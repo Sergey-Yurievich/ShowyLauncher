@@ -1,7 +1,11 @@
 package ru.homescreen.tv
 
+import android.Manifest
 import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.provider.Settings
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
@@ -34,5 +38,30 @@ class KeysService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
+    }
+
+    companion object {
+        /**
+         * Puts this service back among the enabled accessibility services when it fell out: force-stopping the launcher
+         * (Settings → Force stop, a "cleaner" app) clears the whole list, and the remote's buttons go dead. Needs
+         * WRITE_SECURE_SETTINGS, which only adb can grant (scripts/install.sh does); without it this does nothing.
+         */
+        fun ensureEnabled(context: Context) {
+            if (context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return
+            val me = ComponentName(context, KeysService::class.java)
+            val cr = context.contentResolver
+            val cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+            val listed = cur.split(':').any { ComponentName.unflattenFromString(it) == me }
+            try {
+                if (!listed) {
+                    val entry = me.flattenToShortString()
+                    Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, if (cur.isBlank()) entry else "$cur:$entry")
+                }
+                if (Settings.Secure.getInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 0) != 1) {
+                    Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)
+                }
+            } catch (_: SecurityException) {
+            }
+        }
     }
 }

@@ -45,21 +45,30 @@ case "$out" in
 esac
 # The TV provider (Live TV channels); install-time on some firmware, then this grant fails harmlessly.
 A shell pm grant "$PKG" com.android.providers.tv.permission.READ_EPG_DATA >/dev/null 2>&1 || true
+# Lets the launcher put its remote-buttons service back when force-stopping it has cleared the list (KeysService).
+A shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1 || true
 
 # The only home screen. The first-run wizard goes first, while Google TV's home still owns Home: once that is off,
 # the wizard's recovery screen would claim Home itself. A saved Wi-Fi network owned by the wizard would be deleted
 # with it, so then it is left on.
+# Google TV's own home then stays on too: with the wizard on and the home off, the wizard's recovery screen takes Home
+# (a blank screen, Wi-Fi dropping).
+keep_stock=""
 if installed com.google.android.tungsten.setupwraith; then
   if sh_out dumpsys wifi | grep -q 'cname=com.google.android.tungsten.setupwraith'; then
-    echo "Мастер первого запуска оставлен включённым: ему принадлежит сохранённая сеть Wi-Fi."
+    keep_stock=1
+    echo "Стандартный экран Google TV оставлен включённым: мастеру первого запуска принадлежит сохранённая сеть Wi-Fi."
     echo "Забудьте эту сеть и подключитесь к ней заново в Настройках, потом запустите скрипт ещё раз."
   else
     sh_out pm disable-user --user 0 com.google.android.tungsten.setupwraith >/dev/null || true
   fi
 fi
-for home in com.google.android.apps.tv.launcherx com.google.android.tvlauncher com.google.android.leanbacklauncher; do
-  if installed "$home"; then sh_out pm disable-user --user 0 "$home" >/dev/null || true; fi
-done
+disabled_homes=""
+if [ -z "$keep_stock" ]; then
+  for home in com.google.android.apps.tv.launcherx com.google.android.tvlauncher com.google.android.leanbacklauncher; do
+    if installed "$home"; then sh_out pm disable-user --user 0 "$home" >/dev/null || true; disabled_homes="$disabled_homes $home"; fi
+  done
+fi
 A shell cmd package set-home-activity --user 0 "$PKG/.MainActivity" >/dev/null
 
 # The remote's Settings and Input buttons (KeysService), added to whatever accessibility services are on. Put again on
@@ -78,5 +87,12 @@ A shell settings put secure accessibility_enabled 1
 A shell cmd role add-role-holder android.app.role.ASSISTANT "$PKG" >/dev/null 2>&1 || true
 
 A shell am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null
-echo "Главный экран: $(sh_out cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -n 1)"
+home_now=$(sh_out cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -n 1)
+echo "Главный экран: $home_now"
+# set-home-activity can answer Success and change nothing: then Google TV's home comes back rather than no home at all.
+if [ "$home_now" != "$PKG/.MainActivity" ] && [ -n "$disabled_homes" ]; then
+  for home in $disabled_homes; do A shell pm enable --user 0 "$home" >/dev/null; done
+  die "лаунчер не стал главным экраном ($home_now); стандартный экран Google TV включён обратно. Перезагрузите ТВ и запустите скрипт снова."
+fi
+[ "$(sh_out getprop ro.adb.secure)" = 0 ] && echo "Внимание: этот ТВ пускает отладку без подтверждения — после установки обязательно выключите её (шаг 3)."
 installed net.gtvbox.vimuhd || echo "Внимание: нет плеера ViMu. Установите «ViMu Media Player for TV» из Play Маркета — фильмы играют в нём."

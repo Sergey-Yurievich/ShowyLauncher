@@ -3,6 +3,10 @@
 
 die() { echo "Ошибка: $*" >&2; exit 1; }
 
+# Git Bash on Windows rewrites arguments that look like paths (/data/local/tmp/...) into Windows paths for adb.exe.
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*'
+
+
 find_adb() {
   [ -n "${ADB:-}" ] && return
   local c
@@ -47,11 +51,17 @@ installed() { [ -n "$(sh_out pm path "$1" 2>/dev/null)" ]; }
 
 is_tcl() { sh_out getprop ro.product.manufacturer | grep -qi tcl; }
 
+# The TV's serial number: backups are kept per TV, not per IP (which can change).
+serial() { sh_out getprop ro.serialno; }
+
 # Packages of one batch of the list file, or of several: batch_packages <file> <n>...
 batch_packages() {
   local file="$1"; shift
   local n
   for n in "$@"; do
-    awk -v n="$n" '/^# Batch /{on=($3==n":")} on && /^[a-zA-Z]/{print $1}' "$file"
+    # A list saved by Notepad may carry a BOM and CRLF line ends; only well-formed package names get through.
+    LC_ALL=C sed -e $'1s/^\xEF\xBB\xBF//' -e $'s/\r$//' "$file" |
+      awk -v n="$n" '/^# Batch /{on=($3==n":")} on && /^[a-zA-Z]/{print $1}' |
+      grep -E '^[a-zA-Z][a-zA-Z0-9_]*(\.[a-zA-Z0-9_]+)+$' || true
   done
 }

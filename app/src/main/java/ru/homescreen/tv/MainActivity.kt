@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        KeysService.ensureEnabled(this)
         vm.onResume()
     }
 

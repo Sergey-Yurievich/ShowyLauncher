@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Saves what the TV is like now into backups/<date>-<model>-<IP>/: packages, settings, home screen, assistant, Wi-Fi
-# owners. debloat.sh runs it by itself before the first change; restore.sh does not need it, but it is the record of
-# how the TV was.
+# Saves what the TV is like now into backups/<date-time>-<model>-<serial>/: packages, settings (the assistant among
+# them), home screen, Wi-Fi owners. Never overwrites: the earliest one is the record of how the TV came, and restore.sh
+# leaves alone what was already off in it. debloat.sh runs this by itself before its first change on a TV.
 # Usage: scripts/backup.sh <IP>
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -9,7 +9,7 @@ cd "$(dirname "$0")/.."
 connect_tv "${1:-}"
 
 model=$(sh_out getprop ro.product.name)
-dir="backups/$(date +%Y-%m-%d)-${model:-tv}-$HOST"
+dir="backups/$(date +%Y-%m-%d-%H%M%S)-${model:-tv}-$(serial)"
 mkdir -p "$dir"
 sh_out getprop > "$dir/getprop.txt"
 sh_out pm list packages > "$dir/packages-all.txt"

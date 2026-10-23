@@ -18,10 +18,12 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
    (macOS: `brew install android-platform-tools`, если есть Homebrew, иначе Platform-Tools с developer.android.com в
    `~/platform-tools`; Windows: Platform-Tools в `%USERPROFILE%\platform-tools`, команды — в Git Bash; Linux: `apt install adb`).
 2. `scripts/backup.sh <IP>` — связь и резервная копия. «unauthorized» — попросите разрешить отладку на экране ТВ.
+   Порт 5555 закрыт (бывает на Google TV 14) — сопряжение через «Беспроводную отладку»: `adb pair`, `adb connect`,
+   `adb tcpip 5555` (docs/INSTALL.md, шаг 0.3).
 3. Очистка: `scripts/debloat.sh <IP> <партия>`, **по одной партии**. Перед каждой покажите пользователю, что в неё
    входит (из `scripts/tcl-google-tv.txt`), и получите согласие. После каждой сделайте снимок экрана
    (`adb -s <IP>:5555 exec-out screencap -p > shot.png`), посмотрите его и попросите пользователя проверить «Домой»,
-   HDMI и звук.
+   HDMI и звук. Снимок чёрный, пока на экране HDMI или эфир: попросите нажать «Домой» — это не поломка.
    - Партия 4 — приложения по выбору. Спросите, что из списка оставить, создайте копию списка без этих строк
      (`my-tv.txt`, заголовок `# Batch 4:` сохранить) и запустите `LIST=my-tv.txt scripts/debloat.sh <IP> 4`.
      Файл репозитория не правьте.
@@ -33,7 +35,9 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
    микрофона (поиск слушает). Через ADB это не проверить: `input keyevent` не доходит до служб спец. возможностей, а
    кнопка микрофона — вообще не клавиша.
 7. Showy: пользователь открывает любой фильм и отправляет код боту. Сервер — шестерёнка → «Источник фильмов».
-8. В конце напомните про шаг 3: выключить отладку и перезагрузить ТВ.
+8. Шаг 3: попросите перезагрузить ТВ **до** закрытия отладки и проверьте после загрузки, что главный экран наш
+   (`cmd package resolve-activity ... HOME`) и `pm list packages -d` не изменился. Потом — выключить отладку и
+   проверить `nc -vz <IP> 5555`.
 
 **Нельзя:**
 
@@ -43,6 +47,10 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
   микрофон), `com.google.android.katniss` (распознавание речи), `com.google.android.gms`, `com.android.vending`,
   `com.tcl.tv`, `com.tcl.tvinput`, `com.tcl.autopair`.
 - Отключать стандартный главный экран Google TV до того, как лаунчер установлен (это делает `install.sh`).
+- Отключать незнакомый пакет, не посмотрев, что он делает: `dumpsys package <пакет>` (activity, службы, отвечает ли
+  на HOME). Неясно — спросите пользователя.
+- `am force-stop ru.homescreen.tv`: это стирает список служб спец. возможностей, и кнопки пульта замолкают до
+  следующего «Домой» (лаунчер восстанавливает службу сам, если `install.sh` выдал ему WRITE_SECURE_SETTINGS).
 - Читать или выводить токен Showy (`shared_prefs/showy.xml` лаунчера) и ключ TMDB из `local.properties`.
 
 **Если что-то пошло не так:** одно приложение назад — `scripts/restore.sh <IP> <пакет>`, всё — `scripts/restore.sh <IP>`.

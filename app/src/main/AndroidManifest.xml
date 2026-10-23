@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice search: Google TV's recognizer listens on the remote's microphone for us (VoiceInput). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Granted over adb only (scripts/install.sh): the launcher re-enables its remote-buttons service (KeysService). -->
+    <uses-permission
+        android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- Lampa's home-screen rows («Продолжить просмотр», plugin rows) live in the TV provider. Granted with
          `pm grant ru.homescreen.tv com.android.providers.tv.permission.READ_EPG_DATA` at install. -->
     <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />

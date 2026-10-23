@@ -19,11 +19,17 @@ if [ $# -gt 0 ]; then
   exit 0
 fi
 
-# Only what these scripts switch off: anything disabled by hand before stays as it was.
+# Only what these scripts switch off, and not what was already off when the TV came (the earliest backup of it):
+# anything disabled at the factory or by hand before stays as it was.
+first=$(ls -d backups/*-"$(serial)" 2>/dev/null | sort | head -n 1)
+factory=""
+if [ -n "$first" ]; then factory=$(sed 's/^package://' "$first/packages-disabled.txt" | tr -d '\r')
+else echo "Нет резервной копии этого ТВ в backups/: включаю всё из списка, что сейчас выключено."; fi
 ours="$(batch_packages "$LIST" 1 2 3 4 5 6 7 8 9) com.google.android.tungsten.setupwraith
 com.google.android.apps.tv.launcherx com.google.android.tvlauncher com.google.android.leanbacklauncher"
 disabled=$(sh_out pm list packages -d | sed 's/^package://')
 for p in $ours; do
+  if echo "$factory" | grep -qx "$p"; then echo "$p выключен с завода — не трогаю"; continue; fi
   if echo "$disabled" | grep -qx "$p"; then
     echo "включаю $p"
     A shell pm enable --user 0 "$p" >/dev/null
