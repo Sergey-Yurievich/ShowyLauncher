@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 TV banner: a dark glass tile with a warm glow, no text. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="320" android:endY="180"
+                android:startColor="#FF2A2140" android:endColor="#FF07080A" />
+        </aapt:attr>
+    </path>
+    <path android:pathData="M60,180a100,100 0,0 1,200 0z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="160" android:centerY="180" android:gradientRadius="110"
+                android:startColor="#CCFFB66B" android:endColor="#00FFB66B" />
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#FFFFFFFF" android:pathData="M140,62l44,28l-44,28z" />
+</vector>

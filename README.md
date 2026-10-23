@@ -1,0 +1,59 @@
+# ShowyLauncher
+
+Главный экран для телевизоров на Google TV, в котором фильмы и сериалы ищутся и смотрятся без лишних приложений:
+подборки на главном экране, поиск (с клавиатуры и голосом с пульта), выбор источника, сезона и озвучки через
+[Showy](https://t.me/showybot), воспроизведение в ViMu. Сделан и проверен на TCL G08 (Google TV 12 и 14).
+
+**Установка:** [docs/INSTALL.md](docs/INSTALL.md) — по шагам сами или с помощью Claude.
+
+## Что умеет
+
+- **Главная, Фильмы, Сериалы, Приложения.** Большой блок с фоном и логотипом фильма, ряды подборок: тренды недели,
+  «Вышло в цифре», новые серии, Netflix / HBO / Apple TV+, жанры, сезонные и т. д. «Смотреть все» листает подборку целиком.
+- **«Смотреть».** Источник, сезон и озвучка выбираются на экране фильма, серии — с названиями, длительностью и рейтингом
+  из TMDB. Раздачи ShowyTOR — по размеру, варианты фильма — по качеству. Фильм играет в ViMu, лаунчер запоминает позицию.
+- **«Продолжить просмотр» и закладки.** Плашка «Новая серия», когда серия уже вышла в вашей озвучке, или дата следующей.
+- **Поиск.** Экранная клавиатура РУ/EN и голос: кнопка микрофона на пульте сразу открывает поиск, который слушает.
+- **Верхняя строка.** Время, погода и город (определяются по сети), кнопка приставки (PlayStation / Xbox — если
+  подключена по HDMI), входы, настройки. Кнопки пульта «Настройки» и «Источник» работают и без стандартного экрана Google TV.
+- **Сервер Showy** выбирается в настройках: бесплатный, «РФ и соседи» или «Остальной мир».
+- Плавно на слабом железе: 60 кадров в секунду на TCL G08 с 2,4 ГБ памяти.
+
+## Что нужно
+
+- Google TV / Android TV 9 или новее. Список очистки (`scripts/tcl-google-tv.txt`) — для TCL.
+- Аккаунт Showy (бесплатный или PRO) и плеер ViMu из Play Маркета.
+- Компьютер для установки по сети (ADB).
+
+## Устройство репозитория
+
+| Путь | Что это |
+|---|---|
+| `app/` | Сам лаунчер: Kotlin + Jetpack Compose, пакет `ru.homescreen.tv` |
+| `scripts/` | Очистка (`debloat.sh` + `tcl-google-tv.txt`), установка (`install.sh`), откат (`restore.sh`), резервная копия (`backup.sh`) |
+| `docs/INSTALL.md` | Инструкция по установке |
+| `CLAUDE.md` | Правила для Claude Code: установка на ТВ и разработка |
+
+### Сборка из исходников
+
+Нужен JDK 17+ (подойдёт встроенный в Android Studio) и ключ TMDB: бесплатно на
+[themoviedb.org](https://www.themoviedb.org/settings/api). Положите его в `local.properties`:
+
+```
+tmdb.apiKey=ваш_ключ
+```
+
+Потом `./gradlew assembleRelease` или сразу `scripts/install.sh <IP ТВ>` — он соберёт и установит.
+
+## Благодарности и лицензии
+
+- Данные о фильмах: [TMDB](https://www.themoviedb.org). This product uses the TMDB API but is not endorsed or
+  certified by TMDB.
+- Поиск источников: [Showy](https://t.me/showybot) (сервер Lampac). ShowyLauncher — независимый проект, он не связан с
+  Showy, TMDB, Google или TCL.
+- Погода: [MET Norway](https://api.met.no) и [Open-Meteo](https://open-meteo.com), место — [ip-api.com](https://ip-api.com).
+- Шрифт [Onest](https://github.com/googlefonts/onest) — SIL Open Font License (`FONT-LICENSE-OFL.txt`).
+  Значки PlayStation и Xbox — [Simple Icons](https://simpleicons.org) (CC0).
+- Идея очистки телевизора — [CleanYourTV](https://github.com/Gathin23/cleanyourtv).
+
+Код — [MIT](LICENSE).

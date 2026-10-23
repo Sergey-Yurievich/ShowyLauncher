@@ -1,0 +1,1 @@
+-keep class ru.homescreen.tv.InputKeyService { *; }

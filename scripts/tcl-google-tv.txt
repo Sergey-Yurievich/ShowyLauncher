@@ -1,0 +1,62 @@
+# Что отключить на TCL Google TV. Проверено на TCL G08 «Smart TV Pro» (MediaTek), Google TV 12 и Google TV 14.
+#
+# Пакеты ОТКЛЮЧАЮТСЯ (pm disable-user --user 0), ничего не удаляется: вернуть всё — scripts/restore.sh <IP>,
+# одно приложение — scripts/restore.sh <IP> <пакет>. Пакеты, которых нет на вашем ТВ, скрипт просто пропускает.
+# Применяйте по одной партии и проверяйте ТВ после каждой: scripts/debloat.sh <IP> 1, потом 2 и т. д.
+#
+# Не трогаем, они нужны ТВ: com.tcl.tv (эфир и HDMI), com.tcl.tvinput, com.tcl.dashboard, com.tcl.autopair (пульт),
+# com.tcl.systemserver, com.tcl.providers.config, com.tcl.initsetup, com.tcl.factory.view, com.tcl.useragreement,
+# com.tcl.globalkeyoverlay, com.tcl.overlay.systemui, com.tcl.inputmethod.international (клавиатура), com.tcl.eva,
+# com.tcl.hearaid, com.tcl.t_solo, com.tcl.UpdatePeripheral, все com.mediatek.* кроме AirPlay,
+# com.google.android.tv.remote.service (пульт и его микрофон), com.google.android.katniss (голосовой поиск лаунчера),
+# com.google.android.gms, com.android.vending (Play Маркет).
+# Стандартный главный экран Google TV (launcherx) и мастер первого запуска (setupwraith) отключает scripts/install.sh,
+# когда лаунчер уже установлен.
+
+# Batch 1: слежка и аналитика TCL и Google
+com.tcl.ttvs                           # Samba TV: распознаёт, что вы смотрите, и аналитика TCL
+com.tcl.logkit                         # сбор и отправка логов
+com.tcl.usercenter                     # напоминания войти в аккаунт TCL
+com.google.android.feedback            # отправка отзывов Google
+com.google.android.partnersetup        # атрибуция партнёров
+com.android.tv.feedbackconsent         # согласие на отправку отзывов
+
+# Batch 2: реклама и промо TCL
+com.tcl.channelplus                    # TCL Live: бесплатные каналы с рекламой
+com.tcl.tv.tclhome_passive             # подсовывает контент TCL на главный экран при включении
+com.tcl.partnercustomizer              # правки TCL в рядах главного экрана Google TV
+com.tcl.interactive                    # фоновая служба TCL TIAS
+com.tcl.messagebox                     # push-сообщения и акции TCL
+com.tcl.waterfall.overseas             # рекомендации фильмов от TCL
+android.autoinstalls.config.google.gtvpai   # молча ставит партнёрские приложения
+
+# Batch 3: демо-режим магазина, режим отеля и лишние службы
+com.tcl.exhibit                        # демо-режим магазина
+com.tcl.esticker                       # наклейки демо-режима
+com.tcl.hotelmenu                      # меню режима отеля
+com.tcl.ocean.instructions             # электронное руководство
+com.tcl.repairguide                    # руководство по ремонту
+com.tcl.guard                          # «очистка» и менеджер приложений TCL
+com.google.android.play.games          # Google Play Игры
+com.tcl.smartalexa                     # интеграция с Amazon Alexa
+com.tcl.magiconnectfree                # TCL MagiConnect: пульт и трансляция с телефона
+
+# Batch 4: приложения по желанию. ПРОЧИТАЙТЕ и удалите из этой партии строки с тем, чем пользуетесь.
+com.netflix.ninja                      # Netflix
+com.netflix.tokenmanager               # служба входа Netflix
+com.amazon.amazonvideo.livingroom      # Prime Video
+com.google.android.youtube.tvmusic     # YouTube Music
+com.google.android.videos              # Google TV: фильмы и покупки
+com.iqiyi.i18n.tv                      # iQIYI
+com.tcl.ui_mediaCenter                 # плеер файлов с флешки
+com.tcl.gallery                        # фотогалерея TCL и её заставка
+com.tcl.miracast                       # Miracast: повтор экрана телефона
+com.tcl.airplay2                       # AirPlay
+com.mediatek.AirplayAPK                # AirPlay (MediaTek)
+com.mediatek.airplaydaemon             # AirPlay (MediaTek)
+com.tcl.gamebar                        # игровая панель для приставок — оставьте, если играете на ТВ
+com.google.android.apps.tv.dreamx      # заставка Google с подсказками и рекламой: без неё заставки не будет
+
+# Batch 5: только ПОСЛЕ установки лаунчера. Панель TCL, которую открывает кнопка «Источник» (в ней реклама приложений).
+# Потом кнопку «Источник» обслуживает лаунчер: открывает своё меню входов.
+com.tcl.suspension                     # TCL Quick Panel

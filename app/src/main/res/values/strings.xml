@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Главный экран</string>
+    <string name="keys_service_name">Кнопки пульта</string>
+    <string name="keys_service_description">Кнопки «Настройки» и «Источник» на пульте: настройки Android и входы главного экрана.</string>
+</resources>
