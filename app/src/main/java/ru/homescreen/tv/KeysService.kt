@@ -20,6 +20,7 @@ class KeysService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        connected = true
         // Bound again after the launcher updated itself from the gear menu: back to Home, not the app open before.
         if (Updater.takeJustUpdated(this)) {
             try {
@@ -51,22 +52,44 @@ class KeysService : AccessibilityService() {
     override fun onInterrupt() {
     }
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        connected = false
+        return super.onUnbind(intent)
+    }
+
     companion object {
+        /** Bound by Android right now. Listed as enabled is not enough: see [ensureEnabled]. */
+        @Volatile
+        var connected = false
+            private set
+
         /**
          * Puts this service back among the enabled accessibility services when it fell out: force-stopping the launcher
-         * (Settings → Force stop, a "cleaner" app) clears the whole list, and the remote's buttons go dead. Needs
-         * WRITE_SECURE_SETTINGS, which only adb can grant (scripts/install.sh does); without it this does nothing.
+         * (Settings → Force stop, a "cleaner" app) clears the whole list, and the remote's buttons go dead. Listed but not
+         * bound happens too: after an update TCL's app-boot guard keeps Android from binding it again; writing the
+         * entry anew makes Android bind it. Needs WRITE_SECURE_SETTINGS, which only adb can grant (scripts/install.sh
+         * does); without it this does nothing.
          */
         fun ensureEnabled(context: Context) {
             if (context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED) return
             val me = ComponentName(context, KeysService::class.java)
             val cr = context.contentResolver
             val cur = Settings.Secure.getString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
-            val listed = cur.split(':').any { ComponentName.unflattenFromString(it) == me }
+            val others = cur.split(':').filter { it.isNotBlank() && ComponentName.unflattenFromString(it) != me }
+            val listed = others.size != cur.split(':').count { it.isNotBlank() }
             try {
+                val all = (others + me.flattenToShortString()).joinToString(":")
                 if (!listed) {
-                    val entry = me.flattenToShortString()
-                    Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, if (cur.isBlank()) entry else "$cur:$entry")
+                    Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, all)
+                } else if (!connected) {
+                    // Out and back in, apart: two writes in a row read as no change, and nothing is bound.
+                    Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, others.joinToString(":"))
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        try {
+                            Settings.Secure.putString(cr, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, all)
+                        } catch (_: SecurityException) {
+                        }
+                    }, 600)
                 }
                 if (Settings.Secure.getInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 0) != 1) {
                     Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1)

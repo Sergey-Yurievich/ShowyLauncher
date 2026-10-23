@@ -72,7 +72,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        KeysService.ensureEnabled(this)
+        // A little later: on a normal start Android binds the service by itself, only a lost binding needs the nudge.
+        window.decorView.postDelayed({ KeysService.ensureEnabled(this) }, 2500)
         vm.onResume()
     }
 
