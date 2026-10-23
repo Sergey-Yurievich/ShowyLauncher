@@ -11,8 +11,9 @@
 | | |
 |---|---|
 | ![Ряд подборки](docs/screenshots/rows.jpg)<br>Ряд подборки: блок сверху показывает фильм в фокусе | ![Жанры](docs/screenshots/genres.jpg)<br>Жанры на вкладках «Фильмы» и «Сериалы» |
-| ![Экран «Смотреть»](docs/screenshots/watch.jpg)<br>«Смотреть»: источник, сезон, озвучка, серии | ![Выбор источника](docs/screenshots/sources.jpg)<br>Источники Showy с лучшим качеством |
-| ![Поиск](docs/screenshots/search.jpg)<br>Поиск: клавиатура РУ/EN и голос | ![Настройки](docs/screenshots/settings.jpg)<br>Шестерёнка: сервер Showy и настройки Android |
+| ![Экран «Смотреть»](docs/screenshots/watch.jpg)<br>«Смотреть»: источник, сезон, озвучка, серии, ниже — «Похожее» | ![Выбор источника](docs/screenshots/sources.jpg)<br>Источники Showy с лучшим качеством |
+| ![Поиск](docs/screenshots/search.jpg)<br>Поиск: клавиатура РУ/EN и голос | ![Настройки](docs/screenshots/settings.jpg)<br>Шестерёнка: сервер Showy, связь с другими ТВ, настройки Android |
+| ![Меню долгого нажатия](docs/screenshots/menu.jpg)<br>Долгое нажатие OK на серии: отметить просмотренной | ![Перемещение приложения](docs/screenshots/apps.jpg)<br>Долгое нажатие на приложении: переместить или скрыть |
 
 ## Что умеет
 
