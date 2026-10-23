@@ -92,7 +92,20 @@ object Updater {
         return a == b
     }
 
+    /**
+     * Replaced by its own update, the launcher would leave the TV on whatever app was open before. The mark set here
+     * is read by [KeysService] once Android binds it to the new version: it brings Home back (a broadcast receiver
+     * may not open screens from the background).
+     */
+    fun takeJustUpdated(context: Context): Boolean {
+        val p = context.getSharedPreferences("homescreen", Context.MODE_PRIVATE)
+        if (!p.getBoolean("updating", false)) return false
+        p.edit().putBoolean("updating", false).apply()
+        return true
+    }
+
     private fun commit(context: Context, apk: File) {
+        context.getSharedPreferences("homescreen", Context.MODE_PRIVATE).edit().putBoolean("updating", true).apply()
         val installer = context.packageManager.packageInstaller
         val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
             setAppPackageName(context.packageName)

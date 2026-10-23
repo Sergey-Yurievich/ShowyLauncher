@@ -18,6 +18,17 @@ import android.view.accessibility.AccessibilityEvent
  */
 class KeysService : AccessibilityService() {
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        // Bound again after the launcher updated itself from the gear menu: back to Home, not the app open before.
+        if (Updater.takeJustUpdated(this)) {
+            try {
+                startActivity(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_MAIN).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (_: Exception) {
+            }
+        }
+    }
+
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val code = event.keyCode
         val settings = code == KeyEvent.KEYCODE_SETTINGS || code == KeyEvent.KEYCODE_NOTIFICATION
