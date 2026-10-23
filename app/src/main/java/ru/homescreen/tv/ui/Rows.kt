@@ -132,7 +132,7 @@ fun Rows(
             androidx.compose.runtime.key(rows[i].id) {
                 RowView(
                     rows[i], ys[i], state, rowsMode, trailer,
-                    focusedCol = if (rowsMode && i == r && nav.zone == Zone.ROWS && nav.layer == Layer.NONE) nav.col else -1,
+                    focusedCol = if (rowsMode && i == r && nav.zone == Zone.ROWS && nav.base == Layer.NONE) nav.col else -1,
                     col = if (i == r) nav.col else nav.mem[rows[i].id] ?: 0,
                     nav = nav, vm = vm, accent = accent,
                 )
@@ -253,6 +253,11 @@ private fun TileView(
             is GenreTile -> GenreContent(tile)
             is AppTile -> AppContent(tile)
             is MoreTile -> MoreContent()
+        }
+        // An app being moved («Переместить»): arrows on its sides until OK.
+        if (focused && tile is AppTile && tile.app.pkg == nav.moving) Box(Modifier.fillMaxSize().background(Color(0x8C000000))) {
+            Ico(Icons.Left, 44.u, Color.White, Modifier.align(Alignment.CenterStart).padding(start = 10.u))
+            Ico(Icons.Right, 44.u, Color.White, Modifier.align(Alignment.CenterEnd).padding(end = 10.u))
         }
         if (focused) Box(Modifier.fillMaxSize().drawWithContent {
             drawContent()

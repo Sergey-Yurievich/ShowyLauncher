@@ -1,10 +1,13 @@
 package ru.homescreen.tv.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,16 +22,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -41,6 +48,7 @@ import ru.homescreen.tv.WatchSession.Phase
 import ru.homescreen.tv.WatchSession.Zone
 import ru.homescreen.tv.data.Details
 import ru.homescreen.tv.data.Showy
+import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
 
 private const val ROWS = 7
@@ -49,13 +57,20 @@ private const val PILLS_Y = 340f
 private const val LIST_Y = 430f
 private const val ROW_H = 72f
 private const val ROW_GAP = 8f
+/** «Похожее»: its title, then posters as on Home. */
+private const val REL_TITLE = 52f
+private const val POSTER_W = 200f
+private const val POSTER_H = 300f
 
 /**
  * The film's screen: logo, facts and overview on top, then source, season, voice (and trailer) as pills, then the
  * files. Sources are looked up as soon as it opens, so watching is one step from a poster.
  */
 @Composable
-fun WatchScreen(w: WatchSession?, d: Details?, visible: Boolean, bookmarked: Boolean, newEpisode: String?) {
+fun WatchScreen(
+    w: WatchSession?, d: Details?, visible: Boolean, bookmarked: Boolean, newEpisode: String?, accent: State<Color>,
+    badge: (Title) -> String?,
+) {
     AnimatedVisibility(visible && w != null, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
         val s = w ?: return@AnimatedVisibility
         Box(Modifier.fillMaxSize().background(Colors.Bg)) {
@@ -64,20 +79,33 @@ fun WatchScreen(w: WatchSession?, d: Details?, visible: Boolean, bookmarked: Boo
             Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
                 0f to Color(0xFA050608), 0.5f to Color(0xE6050608), 1f to Color(0x8C050608))))
 
-            Box(Modifier.offset(x = 96.u, y = 70.u)) { LogoTitle(s.title.name, Tmdb.img(d?.logo, "w500"), 76f, maxW = 820, maxH = 110) }
-            Column(Modifier.offset(x = 96.u, y = 196.u).width(1040.u), verticalArrangement = Arrangement.spacedBy(12.u)) {
-                MetaLine(heroOf(s.title, d, newEpisode), size = 23)
-                BasicText(s.title.overview, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = text(23, 400, Color(0xD6ECEFF5)).merge(TextStyle(lineHeight = 1.4.em)))
+            // «Похожее» sits right under the files (or the message); a long list pushes it below the screen, and the page
+            // scrolls up while the focus is in it.
+            val relTop = when (s.phase) {
+                Phase.READY -> LIST_Y + minOf(s.list.size, ROWS) * (ROW_H + ROW_GAP) + (if (s.note.isNotEmpty()) 60f else 0f) + 34f
+                Phase.ERROR -> LIST_Y + 120f
+                else -> LIST_Y + 80f
             }
+            val inRelated = s.zone == Zone.RELATED && s.relatedShown
+            val scroll = animateFloatAsState(if (inRelated) (relTop + REL_TITLE + POSTER_H + 56f - 1080f).coerceAtLeast(0f) else 0f,
+                tween(450, easing = FastOutSlowInEasing), label = "ws")
+            Box(Modifier.fillMaxSize().graphicsLayer { translationY = -scroll.value * LocalScaleHolder.px }) {
+                Box(Modifier.offset(x = 96.u, y = 70.u)) { LogoTitle(s.title.name, Tmdb.img(d?.logo, "w500"), 76f, maxW = 820, maxH = 110) }
+                Column(Modifier.offset(x = 96.u, y = 196.u).width(1040.u), verticalArrangement = Arrangement.spacedBy(12.u)) {
+                    MetaLine(heroOf(s.title, d, newEpisode), size = 23)
+                    BasicText(s.title.overview, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        style = text(23, 400, Color(0xD6ECEFF5)).merge(TextStyle(lineHeight = 1.4.em)))
+                }
 
-            // The pills are there in every phase: a title with no sources (yet) can still be bookmarked.
-            Pills(s, bookmarked)
-            when (s.phase) {
-                Phase.LOADING -> Message("Ищем источники…", null)
-                Phase.AUTH -> Auth(s.code)
-                Phase.DENIED, Phase.ERROR -> Message(s.message, if (s.phase == Phase.ERROR) "OK — попробовать ещё раз" else null)
-                Phase.READY -> Ready(s)
+                // The pills are there in every phase: a title with no sources (yet) can still be bookmarked.
+                Pills(s, bookmarked)
+                when (s.phase) {
+                    Phase.LOADING -> Message("Ищем источники…", null)
+                    Phase.AUTH -> Auth(s.code)
+                    Phase.DENIED, Phase.ERROR -> Message(s.message, if (s.phase == Phase.ERROR) "OK — попробовать ещё раз" else null)
+                    Phase.READY -> Ready(s)
+                }
+                if (s.relatedShown) Related(s, relTop, inRelated, accent, badge)
             }
         }
     }
@@ -127,17 +155,51 @@ private fun Ready(s: WatchSession) {
 
     val list = s.list
     val focus = if (s.zone == Zone.LIST && s.picker == null) s.idx else -1
-    s.marks // progress bars follow ViMu results
+    s.marks // the marks are read here, so a new result from ViMu (or the menu) redraws the rows
     Column(Modifier.offset(x = 80.u, y = LIST_Y.u), verticalArrangement = Arrangement.spacedBy(ROW_GAP.u)) {
         val first = (s.idx - 3).coerceIn(0, (list.size - ROWS).coerceAtLeast(0))
         for (i in first until (first + ROWS).coerceAtMost(list.size)) {
             val item = list[i]
-            if (s.files.isEmpty()) SimilarRow(s, item, i == focus) else FileRow(s, item, i == focus)
+            if (s.files.isEmpty()) SimilarRow(s, item, i == focus) else FileRow(s, item, i == focus, s.mark(item))
         }
         if (s.note.isNotEmpty()) BasicText(s.note, modifier = Modifier.padding(start = 16.u, top = 12.u), style = text(25, 400, Colors.Muted))
     }
 
     s.picker?.let { Picker(s, it) }
+}
+
+/** «Похожее»: TMDB's recommendations as a poster row; scrolls like a row on Home, the focused poster second from the left. */
+@Composable
+private fun Related(s: WatchSession, top: Float, active: Boolean, accent: State<Color>, badge: (Title) -> String?) {
+    val step = POSTER_W + 30f
+    val max = (s.related.size * step - (1920f - 96f * 2) + 30f).coerceAtLeast(0f)
+    val shift = animateFloatAsState(((s.relIdx - 1) * step).coerceIn(0f, max), tween(340, easing = FastOutSlowInEasing), label = "rel")
+    BasicText("Похожее", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(27, 600, Color(0xEBECEFF5)))
+    // ModulateAlpha: dimmed, the row must not be cut to its bounds (the focused poster grows past them).
+    Row(
+        Modifier.offset(y = (top + REL_TITLE).u).wrapContentWidth(Alignment.Start, unbounded = true)
+            .graphicsLayer {
+                translationX = (96f - shift.value) * LocalScaleHolder.px
+                alpha = if (active) 1f else 0.6f
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            },
+        horizontalArrangement = Arrangement.spacedBy(30.u),
+    ) {
+        s.related.forEachIndexed { i, t ->
+            val f = active && i == s.relIdx
+            val sc by animateFloatAsState(if (f) 1.1f else 1f, label = "rs")
+            val shape = RoundedCornerShape(18.u)
+            Box(
+                Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer { scaleX = sc; scaleY = sc }
+                    .shadow(if (f) 30.u else 8.u, shape, ambientColor = if (f) accent.value else Color.Black, spotColor = if (f) accent.value else Color.Black)
+                    .clip(shape).background(Color(0xFF15171C)),
+            ) {
+                AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                badge(t)?.let { NewEpisodeBadge(it) }
+                if (f) Box(Modifier.fillMaxSize().border(3.u, Color(0xE6FFFFFF), shape))
+            }
+        }
+    }
 }
 
 private fun chipLabel(s: WatchSession, c: Chip, bookmarked: Boolean): String = when (c) {
@@ -166,8 +228,7 @@ private fun ChoicePill(label: String, focused: Boolean, open: Boolean, icon: and
 }
 
 @Composable
-private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean) {
-    val mark = s.mark(item)
+private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean, mark: ru.homescreen.tv.data.History.Mark?) {
     val ep = s.episode(item)
     if (focused) LaunchedEffect(item.url) { s.probe(item) }
     val fg = if (focused) Colors.FocusFg else Colors.Fg

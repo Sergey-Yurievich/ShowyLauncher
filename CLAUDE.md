@@ -69,7 +69,11 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
   раскладка; `ui/Nav.kt` — своя машина фокуса; `Watch.kt` + `ui/WatchScreen.kt` — экран «Смотреть»; `data/Showy.kt`,
   `data/Html.kt`, `data/Rch.kt` — клиент Showy (Lampac); `data/Tmdb.kt`, `data/Catalog.kt` — TMDB и подборки;
   `VoiceInput.kt` — голосовой поиск (служба распознавания katniss); `Assistant.kt` — роль помощника (кнопка
-  микрофона); `KeysService.kt` — кнопки «Настройки» и «Источник».
+  микрофона); `KeysService.kt` — кнопки «Настройки» и «Источник»; `data/Sync.kt` — общая история связанных ТВ
+  (UDP 47123 — объявления, TCP 47124 — обмен; ключ группы через ECDH, данные AES-GCM; слияние записей по времени в
+  `History.merge` / `Bookmarks.merge`).
+- **Пульт:** OK срабатывает при отпускании; удержание открывает меню долгого нажатия (`Actions.longOk`, слой
+  `Layer.MENU`). Проверка по ADB: `input keyevent --longpress 23`.
 - **Производительность (TCL G08: MediaTek, 2,4 ГБ):** держать 60 fps.
   - Нельзя многоступенчатые градиенты во весь экран, которые рисуются каждый кадр: затемнения заранее отрисованы в картинки.
   - Нельзя бесконечные анимации на весь экран.

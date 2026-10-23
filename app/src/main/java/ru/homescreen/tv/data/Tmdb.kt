@@ -107,6 +107,18 @@ object Tmdb {
         return out.distinctBy { it.key }
     }
 
+    /**
+     * «Похожее» under a title's episodes: TMDB's recommendations (what people watch along with it), topped up with its
+     * similar titles when there are few. Null when TMDB did not answer.
+     */
+    suspend fun related(t: Title): List<Title>? {
+        val base = "${t.media.path}/${t.id}"
+        val rec = get("$base/recommendations", mapOf("page" to 1)) ?: return null
+        var list = clean(rec.optJSONArray("results"), t.media)
+        if (list.size < 8) get("$base/similar", mapOf("page" to 1))?.let { list = list + clean(it.optJSONArray("results"), t.media) }
+        return list.distinctBy { it.key }.filter { it.key != t.key }.take(20)
+    }
+
     /** TMDB's stand-in names ("Эпизод 3", "1 глава", "Episode 3") say nothing the episode number does not. */
     private val GENERIC_EPISODE = Regex("^(\\d+\\s*)?(серия|эпизод|глава|episode|chapter)(\\s*\\d+)?\\.?$", RegexOption.IGNORE_CASE)
 

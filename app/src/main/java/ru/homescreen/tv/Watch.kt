@@ -34,7 +34,7 @@ class WatchSession(
 ) {
     enum class Phase { LOADING, AUTH, DENIED, READY, ERROR }
     enum class Chip { SOURCE, SEASON, VOICE, TRAILER, BOOKMARK }
-    enum class Zone { CHIPS, LIST }
+    enum class Zone { CHIPS, LIST, RELATED }
 
     var phase by mutableStateOf(Phase.LOADING)
         private set
@@ -73,6 +73,13 @@ class WatchSession(
     var picker by mutableStateOf<Chip?>(null)
     var pickIdx by mutableIntStateOf(0)
 
+    /** «Похожее» under the list: TMDB's recommendations for the title. */
+    var related by mutableStateOf<List<Title>>(emptyList())
+        private set
+    var relIdx by mutableIntStateOf(0)
+    /** Back from a title opened from «Похожее»: the focus returns to the poster it was opened from. Set before [start]. */
+    var resumeRelated = -1
+
     /** TMDB episodes by season number, for names, length and rating. */
     val episodes = mutableStateMapOf<Int, Map<Int, Episode>>()
     /** Quality of `call` files, known only after asking the server; by file URL. */
@@ -84,7 +91,7 @@ class WatchSession(
     var marks by mutableIntStateOf(0)
         private set
 
-    private val serial = title.media == Media.TV
+    val serial = title.media == Media.TV
     private var query: Showy.Query? = null
     private var choice = history.choice(title.key) ?: History.Choice("", "")
     private val jobs = ArrayList<Job>()
@@ -108,7 +115,18 @@ class WatchSession(
 
     fun start() {
         jobs += scope.launch { if (Showy.token.isEmpty()) auth() else load() }
+        jobs += scope.launch {
+            val list = Tmdb.related(title) ?: return@launch
+            related = list
+            if (resumeRelated >= 0 && list.isNotEmpty()) {
+                relIdx = resumeRelated.coerceAtMost(list.lastIndex)
+                zone = Zone.RELATED
+            }
+        }
     }
+
+    /** The row is there once loaded, except over the Showy code (its QR code fills the space). */
+    val relatedShown: Boolean get() = related.isNotEmpty() && phase != Phase.AUTH
 
     fun close() {
         jobs.forEach { it.cancel() }
@@ -284,7 +302,8 @@ class WatchSession(
             }
             if (list.isEmpty()) note = if (answered) "Источник ничего не нашёл. Выберите другой." else "Источник не ответил. Выберите другой."
             idx = startIndex()
-            if (list.isEmpty()) zone = Zone.CHIPS else if (picker == null) zone = Zone.LIST
+            // The focus may already be down in «Похожее» (back from one of its titles): the files do not take it.
+            if (zone != Zone.RELATED) { if (list.isEmpty()) zone = Zone.CHIPS else if (picker == null) zone = Zone.LIST }
         }
     }
 
@@ -384,6 +403,23 @@ class WatchSession(
             }
             if (!ok) note = "ViMu не установлен"
         }
+    }
+
+    /**
+     * The long-press menu on a file: marks it (or, with [upTo], every file down to it) watched or not, without playing.
+     * The focus stays where it is.
+     */
+    fun setWatched(i: Int, watched: Boolean, upTo: Boolean = false) {
+        val f = files.getOrNull(i) ?: return
+        val list = if (upTo) files.take(i + 1) else listOf(f)
+        history.setWatched(title, list.map { Triple(it.season, it.episode, label(it)) }, watched)
+        marks++
+        onPlayed()
+    }
+
+    /** A linked TV's marks arrived: the progress bars redraw. */
+    fun refresh() {
+        marks++
     }
 
     private fun label(f: Showy.Item): String =

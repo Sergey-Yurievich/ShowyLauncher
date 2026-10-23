@@ -44,6 +44,7 @@ import ru.homescreen.tv.data.Row
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.data.RowKind
 import ru.homescreen.tv.data.Store
+import ru.homescreen.tv.data.Sync
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.TitleTile
 import ru.homescreen.tv.data.Tmdb
@@ -66,13 +67,23 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     val accents = mutableStateMapOf<String, Color>()
     var continueTiles by mutableStateOf<List<ContinueTile>>(emptyList())
         private set
+    /** The apps shown: the user's order (long press → «Переместить»), without the hidden ones. */
     var apps by mutableStateOf<List<AppInfo>>(emptyList())
         private set
+    private var allApps: List<AppInfo> = emptyList()
     var inputs by mutableStateOf<List<TvInput>>(emptyList())
         private set
     var weather by mutableStateOf<Weather?>(null)
         private set
     private val prefs = app.getSharedPreferences("homescreen", android.content.Context.MODE_PRIVATE)
+    var hiddenApps by mutableStateOf(prefs.getStringSet("apps_hidden", null).orEmpty().toSet())
+        private set
+
+    /** History and bookmarks shared with the TVs linked in the gear menu. */
+    val sync = Sync(app, viewModelScope,
+        state = { org.json.JSONObject().put("history", history.export()).put("bookmarks", bookmarkStore.export()) },
+        merge = ::mergeLinked,
+    )
     /** Where the TV is by the network (kept from the last answer, Moscow before any): weather and clock follow it. */
     var place by mutableStateOf(WeatherApi.decode(prefs.getString("place", null)) ?: WeatherApi.MOSCOW)
         private set
@@ -115,6 +126,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     var watch by mutableStateOf<WatchSession?>(null)
         private set
     private var lampaContinue: List<ContinueTile> = emptyList()
+    /** Titles of «Продолжить» from our own history (Lampa's cannot be taken out). */
+    private var ownContinue: Set<String> = emptySet()
     var bookmarks by mutableStateOf(bookmarkStore.all())
         private set
     /** The episode last played of each series in the history, for «Новая серия». */
@@ -135,6 +148,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (started) return
         started = true
         server = Showy.server
+        history.onChange = sync::changed
+        bookmarkStore.onChange = sync::changed
+        sync.start()
         viewModelScope.launch {
             // Caches of earlier versions nothing reads any more.
             withContext(Dispatchers.IO) { listOf("playable.json", "sources.json").forEach { java.io.File(ctx.filesDir, it).delete() } }
@@ -174,10 +190,16 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (!started) return
         viewModelScope.launch { refreshSystem() }
         if (refreshJob?.isActive != true) refreshCatalog()
+        sync.resume()
+    }
+
+    override fun onCleared() {
+        sync.stop()
     }
 
     private suspend fun refreshSystem() {
-        apps = Apps.load(ctx)
+        allApps = Apps.load(ctx)
+        arrangeApps()
         inputs = withContext(Dispatchers.IO) { Inputs.list(ctx) }
         android.util.Log.i("homescreen", "inputs: " + inputs.joinToString { "${it.label}|${it.sub}|${it.connected}|${it.id}" })
         // Lampa's rows from before the launcher played things itself: the plugin's own channel, else Watch Next.
@@ -188,7 +210,9 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** What was watched here through ViMu first, then anything Lampa still lists. */
     private fun refreshContinue() {
-        val own = history.entries().map { e ->
+        val entries = history.entries()
+        ownContinue = entries.mapTo(HashSet()) { it.title.key }
+        val own = entries.map { e ->
             val left = if (e.mark.durationMs > e.mark.positionMs) ((e.mark.durationMs - e.mark.positionMs) / 60_000).toInt() else 0
             val label = when {
                 e.title.media == Media.TV -> e.label
@@ -198,13 +222,64 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             }
             ContinueTile(e.title, null, e.mark.progress, label, null)
         }
-        watchedEpisode = history.entries().filter { it.title.media == Media.TV }.associate { it.title.key to (it.season to it.episode) }
+        watchedEpisode = entries.filter { it.title.media == Media.TV }.associate { it.title.key to (it.season to it.episode) }
         continueTiles = (own + lampaContinue).distinctBy { it.title.key }
         continueTiles.forEach { requestDetails(it.title) }
         refreshFollowed()
     }
 
     fun isBookmarked(key: String) = bookmarks.any { it.key == key }
+
+    fun inContinue(key: String) = key in ownContinue
+
+    fun removeFromContinue(t: Title) {
+        history.remove(t.key)
+        refreshContinue()
+    }
+
+    /** A linked TV's history and bookmarks (any thread): ours take what is newer, the screen follows. */
+    private fun mergeLinked(s: org.json.JSONObject): Boolean {
+        val a = s.optJSONObject("history")?.let(history::merge) ?: false
+        val b = s.optJSONObject("bookmarks")?.let(bookmarkStore::merge) ?: false
+        if (a || b) viewModelScope.launch {
+            bookmarks = bookmarkStore.all()
+            refreshContinue()
+            if (gridOfBookmarks) fillBookmarksGrid()
+            watch?.refresh()
+        }
+        return a || b
+    }
+
+    // ---------- Apps: order and hidden ones ----------
+
+    private fun arrangeApps() {
+        val order = prefs.getString("apps_order", "").orEmpty().split(',').withIndex().associate { it.value to it.index }
+        // Stable: apps the user never placed keep the default order, after the placed ones.
+        apps = allApps.filter { it.pkg !in hiddenApps }.sortedBy { order[it.pkg] ?: Int.MAX_VALUE }
+    }
+
+    /** Puts the app at [to] in the list (Home's row shows the first six). Saved by [saveAppsOrder] when the move ends. */
+    fun moveApp(pkg: String, to: Int) {
+        val list = apps.toMutableList()
+        val i = list.indexOfFirst { it.pkg == pkg }
+        if (i < 0) return
+        list.add(to.coerceIn(0, list.lastIndex), list.removeAt(i))
+        apps = list
+    }
+
+    fun saveAppsOrder() = prefs.edit().putString("apps_order", apps.joinToString(",") { it.pkg }).apply()
+
+    fun hideApp(pkg: String) {
+        hiddenApps = hiddenApps + pkg
+        prefs.edit().putStringSet("apps_hidden", hiddenApps).apply()
+        arrangeApps()
+    }
+
+    fun showHiddenApps() {
+        hiddenApps = emptySet()
+        prefs.edit().remove("apps_hidden").apply()
+        arrangeApps()
+    }
 
     fun toggleBookmark(t: Title) {
         bookmarkStore.toggle(t)
@@ -283,15 +358,33 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openWatch(t: Title) {
+    fun openWatch(t: Title, resumeRelated: Int = -1) {
         watch?.close()
         requestDetails(t)
-        watch = WatchSession(t, viewModelScope, history, ::freshDetails, { details[t.key] }) { refreshContinue() }.also { it.start() }
+        watch = WatchSession(t, viewModelScope, history, ::freshDetails, { details[t.key] }) { refreshContinue() }
+            .also { it.resumeRelated = resumeRelated; it.start() }
+    }
+
+    /** Titles opened from «Похожее» one after another, with the poster each was opened from: Back walks them back. */
+    private val watchBack = ArrayList<Pair<Title, Int>>()
+
+    fun openRelated(t: Title) {
+        val w = watch ?: return
+        watchBack += w.title to w.relIdx
+        openWatch(t)
+    }
+
+    /** Back on a title opened from «Похожее»: the one it was opened from, focused on that poster. False at the first. */
+    fun backFromWatch(): Boolean {
+        val (t, i) = watchBack.removeLastOrNull() ?: return false
+        openWatch(t, resumeRelated = i)
+        return true
     }
 
     fun closeWatch() {
         watch?.close()
         watch = null
+        watchBack.clear()
     }
 
     /** Details with the original title and IMDb id Showy matches by; older cached entries lack them. */

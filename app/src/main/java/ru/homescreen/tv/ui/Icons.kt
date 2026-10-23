@@ -44,5 +44,11 @@ object Icons {
     val BookmarkOn = build("bookmark_on", "M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z" to false)
     val Down = build("down", "M6 9.5l6 6 6-6" to true)
     val Check = build("check", "M5 12.5l4.5 4.5L19 7.5" to true)
+    val Close = build("close", "M6.5 6.5l11 11M17.5 6.5l-11 11" to true)
+    val Left = build("left", "M14.5 6l-6 6 6 6" to true)
+    val Right = build("right", "M9.5 6l6 6-6 6" to true)
+    val Move = build("move", "M7.5 8l-4 4 4 4M16.5 8l4 4-4 4M3.5 12h17" to true)
+    val Hide = build("hide", "M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z" to true, "M4 4l16 16" to true)
+    val Link = build("link", "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" to true, "M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" to true)
     val Antenna =build("antenna", "M5 9h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z" to true, "M8 3l4 5 4-5" to true)
 }

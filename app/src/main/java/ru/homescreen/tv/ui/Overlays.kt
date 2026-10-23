@@ -99,9 +99,29 @@ fun InputsMenu(visible: Boolean, inputs: List<TvInput>, focus: Int) {
     }
 }
 
-/** The gear's dropdown: where films are looked for (the Showy server), then Android's own settings. */
+enum class SettingsKind { UPDATE, SERVER, LINK, UNLINK, UNHIDE, ANDROID }
+
+/** A line of the gear menu; the menu and the remote handling build the same list ([settingsRows]). */
+data class SettingsRow(val kind: SettingsKind, val server: Showy.Server? = null)
+
+fun settingsRows(update: Boolean, linked: Boolean, hidden: Boolean): List<SettingsRow> = buildList {
+    if (update) add(SettingsRow(SettingsKind.UPDATE))
+    Showy.Server.entries.forEach { add(SettingsRow(SettingsKind.SERVER, it)) }
+    add(SettingsRow(SettingsKind.LINK))
+    if (linked) add(SettingsRow(SettingsKind.UNLINK))
+    if (hidden) add(SettingsRow(SettingsKind.UNHIDE))
+    add(SettingsRow(SettingsKind.ANDROID))
+}
+
+/**
+ * The gear's dropdown: an update when there is one, where films are looked for (the Showy server), the TVs sharing
+ * this one's history, hidden apps to bring back, then Android's own settings.
+ */
 @Composable
-fun SettingsMenu(visible: Boolean, current: Showy.Server, focus: Int, update: String?, updating: Boolean) {
+fun SettingsMenu(
+    visible: Boolean, rows: List<SettingsRow>, current: Showy.Server, focus: Int, update: String?, updating: Boolean,
+    pairing: Boolean, peers: List<String>, hidden: Int,
+) {
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
         val shape = RoundedCornerShape(30.u)
         Box(Modifier.fillMaxSize()) {
@@ -113,21 +133,68 @@ fun SettingsMenu(visible: Boolean, current: Showy.Server, focus: Int, update: St
                     .padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
             ) {
-                // A newer release first: the menu opens on it.
-                val shift = if (update != null) 1 else 0
-                if (update != null) {
-                    MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", null, Icons.Down, focus == 0, false)
-                    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
+                rows.forEachIndexed { i, r ->
+                    val f = i == focus
+                    val prev = rows.getOrNull(i - 1)?.kind
+                    when (r.kind) {
+                        SettingsKind.UPDATE -> MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", null, Icons.Down, f, false)
+                        SettingsKind.SERVER -> {
+                            if (prev != SettingsKind.SERVER) {
+                                if (prev != null) MenuDivider()
+                                MenuHeader("Источник фильмов")
+                            }
+                            val s = r.server ?: return@forEachIndexed
+                            MenuRow(s.label, s.host.substringAfter("//"), null, f, s == current)
+                        }
+                        SettingsKind.LINK -> {
+                            MenuDivider()
+                            MenuHeader("Другие ТВ")
+                            when {
+                                pairing -> MenuRow("Ищу другой ТВ…", "Выберите то же на втором ТВ", Icons.Link, f, false)
+                                peers.isEmpty() -> MenuRow("Связать с другим ТВ", "Общие история и закладки", Icons.Link, f, false)
+                                else -> MenuRow("Связать ещё один ТВ", "Связано: " + peers.joinToString(", "), Icons.Link, f, false)
+                            }
+                        }
+                        SettingsKind.UNLINK -> MenuRow("Отвязать этот ТВ", null, Icons.Close, f, false)
+                        SettingsKind.UNHIDE -> {
+                            MenuDivider()
+                            MenuRow("Вернуть скрытые приложения", plural(hidden, "приложение", "приложения", "приложений"), Icons.Hide, f, false)
+                        }
+                        SettingsKind.ANDROID -> {
+                            if (prev != SettingsKind.UNHIDE) MenuDivider()
+                            MenuRow("Настройки Android", null, Icons.Settings, f, false)
+                        }
+                    }
                 }
-                BasicText("Источник фильмов", modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(19, 500, Colors.Muted))
-                Showy.Server.entries.forEachIndexed { i, s ->
-                    MenuRow(s.label, s.host.substringAfter("//"), null, i + shift == focus, s == current)
-                }
-                Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
-                MenuRow("Настройки Android", null, Icons.Settings, focus == Showy.Server.entries.size + shift, false)
             }
         }
     }
+}
+
+/** Long press on OK: what can be done with the focused title, app or episode, as a small panel in the middle. */
+@Composable
+fun ContextMenu(visible: Boolean, items: List<MenuItem>, focus: Int) {
+    AnimatedVisibility(visible, enter = fadeIn(tween(160)) + scaleIn(tween(220), 0.96f), exit = fadeOut(tween(120))) {
+        val shape = RoundedCornerShape(30.u)
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(600.u).shadow(40.u, shape).clip(shape).background(Color(0xF5181A1F)).padding(14.u),
+                verticalArrangement = Arrangement.spacedBy(6.u),
+            ) {
+                items.forEachIndexed { i, item -> MenuRow(item.label, null, item.icon, i == focus, false) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuHeader(label: String) {
+    BasicText(label, modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(19, 500, Colors.Muted))
+}
+
+@Composable
+private fun MenuDivider() {
+    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
 }
 
 @Composable

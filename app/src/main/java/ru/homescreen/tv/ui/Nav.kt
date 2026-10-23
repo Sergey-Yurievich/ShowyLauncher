@@ -7,13 +7,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import ru.homescreen.tv.Tab
 import ru.homescreen.tv.data.Title
 
 enum class Zone { TOP, HERO, ROWS }
-enum class Layer { NONE, INPUTS, SETTINGS, GRID, WATCH, SEARCH }
+enum class Layer { NONE, INPUTS, SETTINGS, GRID, WATCH, SEARCH, MENU }
+
+/** A line of the long-press menu. */
+class MenuItem(val label: String, val icon: ImageVector?, val run: () -> Unit)
 
 /** Top bar items, left to right: four tabs, search and bookmarks, then the round buttons (the console's only when one is plugged in). */
 enum class TopItem { HOME, MOVIES, SERIES, APPS, SEARCH, BOOKMARKS, YOUTUBE, CONSOLE, INPUTS, SETTINGS }
@@ -38,6 +42,18 @@ class Nav {
     /** The layer the film's screen returns to on Back (the grid, search, or none). */
     var watchFrom = Layer.NONE
 
+    /** The long-press menu, over the layer it was opened on ([menuFrom]). */
+    var menu by mutableStateOf<List<MenuItem>>(emptyList())
+    var menuIdx by mutableIntStateOf(0)
+    var menuFrom = Layer.NONE
+    /** What is on screen under the menu: the menu itself is only a panel over it. */
+    val base: Layer get() = if (layer == Layer.MENU) menuFrom else layer
+    /** The app being moved to a new place (package), after «Переместить». */
+    var moving by mutableStateOf<String?>(null)
+    /** OK is down and not yet a long press ([okLong]); it acts when released. */
+    var okDown = false
+    var okLong = false
+
     var trailer by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
 
@@ -55,6 +71,16 @@ class Nav {
             kickX.snapTo(-dy * 7f)
             kickX.animateTo(0f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessLow))
         }
+    }
+
+    /** Opens the menu over the current layer; false (nothing opened) when there is nothing to offer. */
+    fun openMenu(items: List<MenuItem>): Boolean {
+        if (items.isEmpty()) return false
+        menu = items
+        menuIdx = 0
+        menuFrom = layer
+        layer = Layer.MENU
+        return true
     }
 
     fun topIndexOf(tab: Tab): TopItem = TopItem.entries[tab.ordinal]

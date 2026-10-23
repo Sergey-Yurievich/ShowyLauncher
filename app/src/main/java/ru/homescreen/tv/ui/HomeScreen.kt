@@ -89,6 +89,8 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
     val hasHero = nav.tab != Tab.APPS
     if (!hasHero && nav.zone == Zone.HERO) nav.zone = Zone.ROWS
     if (nav.row > rows.lastIndex) nav.row = rows.lastIndex.coerceAtLeast(0)
+    // A tile taken away (out of «Продолжить», a hidden app) must not leave the focus past the row's end.
+    rows.getOrNull(nav.row)?.let { if (nav.col > it.tiles.lastIndex) nav.col = it.tiles.lastIndex.coerceAtLeast(0) }
     val rowsMode = nav.zone == Zone.ROWS || !hasHero
     val rowsTop = if (hasHero) Geo.ROW_TOP else Geo.NO_HERO_TOP
     val curTile: Tile? = rows.getOrNull(nav.row)?.tiles?.getOrNull(nav.col)
@@ -105,6 +107,11 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
     // An update that could not be installed says why.
     LaunchedEffect(ru.homescreen.tv.Updater.problem) {
         ru.homescreen.tv.Updater.problem?.let { nav.toast = it; ru.homescreen.tv.Updater.problem = null }
+    }
+
+    // Linking TVs reports how it went.
+    LaunchedEffect(vm.sync.note) {
+        vm.sync.note?.let { nav.toast = it; vm.sync.note = null }
     }
 
     // The remote's Input button, from anywhere: the Inputs menu over Home.
@@ -196,6 +203,20 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
 
     Box(
         Modifier.fillMaxSize().focusRequester(focus).focusable().onPreviewKeyEvent { e ->
+            // OK acts on release: held down, it opens the long-press menu instead (where there is one).
+            if (e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter) return@onPreviewKeyEvent when (e.type) {
+                KeyEventType.KeyDown -> {
+                    if (e.nativeKeyEvent.repeatCount == 0) { nav.okDown = true; nav.okLong = false }
+                    else if (nav.okDown && !nav.okLong) { nav.okLong = true; if (actions.longOk()) nav.okDown = false }
+                    true
+                }
+                KeyEventType.KeyUp -> {
+                    if (nav.okDown) actions.key(e.key)
+                    nav.okDown = false
+                    true
+                }
+                else -> false
+            }
             if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent e.key == Key.Back || e.key == Key.Escape
             val r = actions.key(e.key)
             if (ru.homescreen.tv.BuildConfig.DEBUG) android.util.Log.d("homescreen", "key ${e.key} repeat=${e.nativeKeyEvent.repeatCount} -> zone=${nav.zone} row=${nav.row} col=${nav.col} layer=${nav.layer}")
@@ -212,18 +233,22 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         if ("pool" !in OFF) Pool(
             cx = anchor?.x ?: 960f,
             cy = (anchor?.y ?: 0f) + rowsTop - 70f,
-            visible = rowsMode && nav.zone == Zone.ROWS && nav.layer == Layer.NONE && !nav.trailer && anchor != null,
+            visible = rowsMode && nav.zone == Zone.ROWS && nav.base == Layer.NONE && !nav.trailer && anchor != null,
             accent = accent,
         )
-        if ("hero" !in OFF) Hero(heroShown, rowsMode, nav.trailer, nav.zone == Zone.HERO && nav.layer == Layer.NONE, featured.size, nav.slide % featured.size.coerceAtLeast(1))
+        if ("hero" !in OFF) Hero(heroShown, rowsMode, nav.trailer, nav.zone == Zone.HERO && nav.base == Layer.NONE, featured.size, nav.slide % featured.size.coerceAtLeast(1))
         if ("rows" !in OFF) Rows(rows, nav, rowsMode, rowsTop, nav.trailer, vm, accent)
         if ("top" !in OFF) TopBar(nav, vm.weather, vm.place, console, visible = !nav.trailer || nav.zone == Zone.TOP)
         InputsMenu(nav.layer == Layer.INPUTS, vm.inputs, nav.inputIdx)
-        SettingsMenu(nav.layer == Layer.SETTINGS, vm.server, nav.settingsIdx, ru.homescreen.tv.Updater.available?.version, ru.homescreen.tv.Updater.busy)
-        GridScreen(nav.layer == Layer.GRID, vm.gridTitle, vm.grid, nav.gridIdx, vm.gridLoading, accent) { vm.newEpisode(it, short = true) }
-        SearchScreen(vm.search, vm.voice, nav.layer == Layer.SEARCH)
-        WatchScreen(vm.watch, vm.watch?.let { vm.details[it.title.key] }, nav.layer == Layer.WATCH,
-            bookmarked = vm.watch?.let { vm.isBookmarked(it.title.key) } == true, newEpisode = vm.watch?.let { vm.newEpisode(it.title) })
+        SettingsMenu(nav.layer == Layer.SETTINGS, actions.settings(), vm.server, nav.settingsIdx, ru.homescreen.tv.Updater.available?.version,
+            ru.homescreen.tv.Updater.busy, vm.sync.pairing, vm.sync.peers.map { it.name }, vm.hiddenApps.size)
+        GridScreen(nav.base == Layer.GRID, vm.gridTitle, vm.grid, nav.gridIdx, vm.gridLoading, accent) { vm.newEpisode(it, short = true) }
+        SearchScreen(vm.search, vm.voice, nav.base == Layer.SEARCH)
+        WatchScreen(vm.watch, vm.watch?.let { vm.details[it.title.key] }, nav.base == Layer.WATCH,
+            bookmarked = vm.watch?.let { vm.isBookmarked(it.title.key) } == true, newEpisode = vm.watch?.let { vm.newEpisode(it.title) }, accent = accent) {
+            vm.newEpisode(it, short = true)
+        }
+        ContextMenu(nav.layer == Layer.MENU, nav.menu, nav.menuIdx)
         Toast(nav)
     }
 }
@@ -249,8 +274,10 @@ private class Actions(
             Layer.GRID -> return gridKey(k, ok, back)
             Layer.WATCH -> return watchKey(k, ok, back)
             Layer.SEARCH -> return searchKey(k, ok, back)
+            Layer.MENU -> return menuKey(k, ok, back)
             Layer.NONE -> {}
         }
+        nav.moving?.let { return moveKey(it, k, ok, back) }
         if (back) {
             when (nav.zone) {
                 Zone.ROWS -> if (nav.tab != Tab.APPS) nav.zone = Zone.HERO else toTop()
@@ -306,7 +333,9 @@ private class Actions(
             TopItem.INPUTS -> { nav.layer = Layer.INPUTS; nav.inputIdx = 0 }
             TopItem.SETTINGS -> {
                 nav.layer = Layer.SETTINGS
-                nav.settingsIdx = if (ru.homescreen.tv.Updater.available != null) 0 else vm.server.ordinal
+                // On the update when there is one, else on the server in use.
+                val rows = settings()
+                nav.settingsIdx = rows.indexOfFirst { it.kind == SettingsKind.UPDATE || it.server == vm.server }.coerceAtLeast(0)
             }
         }
     }
@@ -481,18 +510,18 @@ private class Actions(
             return true
         }
         if (back) {
+            // A title opened from «Похожее» goes back to the one it came from.
+            if (vm.backFromWatch()) return true
             vm.closeWatch()
             nav.layer = nav.watchFrom
-            // A title taken out of the bookmarks leaves their grid: keep the focus inside it, or leave it once empty.
-            if (nav.layer == Layer.GRID) {
-                if (vm.grid.isEmpty()) nav.layer = Layer.NONE else nav.gridIdx = nav.gridIdx.coerceAtMost(vm.grid.lastIndex)
-            }
+            fitGrid()
             return true
         }
         val chips = w.chips
         // Before the sources are in (or when they failed) only the pills work: Up reaches them, OK below them retries.
         if (w.phase != WatchSession.Phase.READY && w.zone == WatchSession.Zone.LIST) {
             if (k == Key.DirectionUp) { w.zone = WatchSession.Zone.CHIPS; w.chip = w.chip.coerceIn(0, (chips.size - 1).coerceAtLeast(0)) }
+            else if (k == Key.DirectionDown && w.relatedShown) w.zone = WatchSession.Zone.RELATED
             else if (ok) w.retry()
             return true
         }
@@ -501,6 +530,7 @@ private class Actions(
                 k == Key.DirectionLeft -> w.chip = (w.chip - 1).coerceAtLeast(0)
                 k == Key.DirectionRight -> w.chip = (w.chip + 1).coerceAtMost((chips.size - 1).coerceAtLeast(0))
                 k == Key.DirectionDown -> if (w.list.isNotEmpty() || w.phase != WatchSession.Phase.READY) w.zone = WatchSession.Zone.LIST
+                    else if (w.relatedShown) w.zone = WatchSession.Zone.RELATED
                 ok -> chips.getOrNull(w.chip)?.let { c ->
                     if (c == WatchSession.Chip.TRAILER) { w.trailer()?.let { trailer(it) }; return true }
                     if (c == WatchSession.Chip.BOOKMARK) {
@@ -522,12 +552,22 @@ private class Actions(
                     w.zone = WatchSession.Zone.CHIPS
                     w.chip = w.chip.coerceIn(0, (chips.size - 1).coerceAtLeast(0))
                 } else w.idx--
-                k == Key.DirectionDown -> w.idx = (w.idx + 1).coerceAtMost((w.list.size - 1).coerceAtLeast(0))
+                k == Key.DirectionDown -> if (w.idx >= w.list.lastIndex && w.relatedShown) w.zone = WatchSession.Zone.RELATED
+                    else w.idx = (w.idx + 1).coerceAtMost((w.list.size - 1).coerceAtLeast(0))
                 ok -> when {
                     w.files.isNotEmpty() -> if (!Vimu.installed(ctx)) nav.toast = "ViMu не установлен" else w.play(w.idx) { i, done ->
                         (ctx as? ru.homescreen.tv.MainActivity)?.forResult(i, done) ?: false
                     }
                     else -> w.similar.getOrNull(w.idx)?.let { w.selectSimilar(it) }
+                }
+            }
+            WatchSession.Zone.RELATED -> when {
+                k == Key.DirectionLeft -> w.relIdx = (w.relIdx - 1).coerceAtLeast(0)
+                k == Key.DirectionRight -> w.relIdx = (w.relIdx + 1).coerceAtMost(w.related.lastIndex.coerceAtLeast(0))
+                k == Key.DirectionUp -> w.zone = if (w.list.isNotEmpty() || w.phase != WatchSession.Phase.READY) WatchSession.Zone.LIST else WatchSession.Zone.CHIPS
+                ok -> w.related.getOrNull(w.relIdx)?.let { t ->
+                    val d = vm.details[t.key]
+                    vm.openRelated(t.copy(poster = t.poster ?: d?.poster, backdrop = t.backdrop ?: d?.backdrop))
                 }
             }
         }
@@ -548,29 +588,162 @@ private class Actions(
         return true
     }
 
-    /** The settings menu: an update when there is one, the Showy servers, then Android's own settings. */
+    fun settings(): List<SettingsRow> =
+        settingsRows(ru.homescreen.tv.Updater.available != null, vm.sync.peers.isNotEmpty(), vm.hiddenApps.isNotEmpty())
+
+    /** The gear menu: see [settingsRows]. Linking keeps it open, so its line shows how the search goes. */
     private fun settingsKey(k: Key, ok: Boolean, back: Boolean): Boolean {
-        val servers = Showy.Server.entries
-        val shift = if (ru.homescreen.tv.Updater.available != null) 1 else 0
+        val rows = settings()
+        nav.settingsIdx = nav.settingsIdx.coerceIn(0, rows.lastIndex)
         when {
             back -> nav.layer = Layer.NONE
-            k == Key.DirectionDown -> nav.settingsIdx = (nav.settingsIdx + 1).coerceAtMost(servers.size + shift)
+            k == Key.DirectionDown -> nav.settingsIdx = (nav.settingsIdx + 1).coerceAtMost(rows.lastIndex)
             k == Key.DirectionUp -> if (nav.settingsIdx == 0) nav.layer = Layer.NONE else nav.settingsIdx--
-            ok && shift == 1 && nav.settingsIdx == 0 -> {
-                nav.toast = "Скачиваю обновление…"
-                scope.launch { ru.homescreen.tv.Updater.install(ctx) }
-            }
             ok -> {
-                nav.layer = Layer.NONE
-                val s = servers.getOrNull(nav.settingsIdx - shift)
-                if (s == null) Apps.launch(ctx, Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                else if (s != vm.server) {
-                    vm.selectServer(s)
-                    nav.toast = "Источник фильмов: ${s.label}"
+                val r = rows[nav.settingsIdx]
+                when (r.kind) {
+                    SettingsKind.UPDATE -> {
+                        nav.toast = "Скачиваю обновление…"
+                        scope.launch { ru.homescreen.tv.Updater.install(ctx) }
+                    }
+                    SettingsKind.SERVER -> {
+                        nav.layer = Layer.NONE
+                        val s = r.server ?: return true
+                        if (s != vm.server) {
+                            vm.selectServer(s)
+                            nav.toast = "Источник фильмов: ${s.label}"
+                        }
+                    }
+                    SettingsKind.LINK -> vm.sync.pair()
+                    SettingsKind.UNLINK -> {
+                        nav.settingsIdx--
+                        vm.sync.unlink()
+                        nav.toast = "Этот ТВ больше не делится историей"
+                    }
+                    SettingsKind.UNHIDE -> {
+                        nav.layer = Layer.NONE
+                        vm.showHiddenApps()
+                        nav.toast = "Скрытые приложения вернулись"
+                    }
+                    SettingsKind.ANDROID -> {
+                        nav.layer = Layer.NONE
+                        Apps.launch(ctx, Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }
                 }
             }
         }
         return true
+    }
+
+    // ---------- Long press ----------
+
+    /** OK held down: the menu for what has the focus; false when there is none (OK then acts as usual on release). */
+    fun longOk(): Boolean {
+        if (nav.trailer && nav.layer == Layer.NONE) nav.trailer = false
+        if (nav.moving != null) return false
+        val items: List<MenuItem>? = when (nav.layer) {
+            Layer.NONE -> when (nav.zone) {
+                Zone.HERO -> featured.getOrNull(nav.slide % featured.size.coerceAtLeast(1))?.let { titleMenu(it) }
+                Zone.ROWS -> rows.getOrNull(nav.row)?.let { row -> row.tiles.getOrNull(nav.col)?.let { tileMenu(it) } }
+                Zone.TOP -> null
+            }
+            Layer.GRID -> vm.grid.getOrNull(nav.gridIdx)?.let { titleMenu(it) }
+            Layer.SEARCH -> if (vm.search.zone == SearchSession.Zone.RESULTS) vm.search.results.getOrNull(vm.search.idx)?.let { titleMenu(it) } else null
+            Layer.WATCH -> watchMenu()
+            else -> null
+        }
+        return nav.openMenu(items.orEmpty())
+    }
+
+    private fun titleMenu(t: Title): List<MenuItem> = buildList {
+        if (vm.inContinue(t.key)) add(MenuItem("Убрать из «Продолжить»", Icons.Close) { vm.removeFromContinue(t) })
+        val on = vm.isBookmarked(t.key)
+        add(MenuItem(if (on) "Убрать из закладок" else "В закладки", if (on) Icons.BookmarkOn else Icons.Bookmark) {
+            vm.toggleBookmark(t)
+            nav.toast = if (on) "Убрано из закладок" else "Добавлено в закладки"
+        })
+    }
+
+    private fun tileMenu(tile: Tile): List<MenuItem>? = when (tile) {
+        is TitleTile -> titleMenu(tile.title)
+        // Lampa's own entries are Lampa's to manage.
+        is ContinueTile -> if (tile.intentUri == null) titleMenu(tile.title) else null
+        is AppTile -> listOf(
+            MenuItem("Переместить", Icons.Move) {
+                nav.moving = tile.app.pkg
+                nav.toast = "Стрелками — на новое место, OK — готово"
+            },
+            MenuItem("Скрыть", Icons.Hide) {
+                vm.hideApp(tile.app.pkg)
+                nav.toast = "Скрыто. Вернуть — в меню шестерёнки"
+            },
+        )
+        else -> null
+    }
+
+    /** On an episode (or a film's file): watched or not by hand, or every episode down to this one. */
+    private fun watchMenu(): List<MenuItem>? {
+        val w = vm.watch ?: return null
+        if (w.zone == WatchSession.Zone.RELATED) return w.related.getOrNull(w.relIdx)?.let { titleMenu(it) }
+        if (w.zone != WatchSession.Zone.LIST || w.picker != null || w.phase != WatchSession.Phase.READY) return null
+        val i = w.idx
+        val f = w.files.getOrNull(i) ?: return null
+        val done = w.mark(f)?.done == true
+        return buildList {
+            if (!done) add(MenuItem(if (w.serial) "Отметить просмотренной" else "Отметить просмотренным", Icons.Check) { w.setWatched(i, true) })
+            // Watched, or started: the mark (and its progress bar) goes.
+            if (w.mark(f) != null) add(MenuItem("Снять отметку", Icons.Close) { w.setWatched(i, false) })
+            if (w.serial && i > 0) {
+                val first = w.files.first().episode
+                add(MenuItem(if (first > 0 && f.episode > first) "Отметить серии $first–${f.episode}" else "Отметить все до этой", Icons.Check) {
+                    w.setWatched(i, true, upTo = true)
+                })
+            }
+        }
+    }
+
+    private fun menuKey(k: Key, ok: Boolean, back: Boolean): Boolean {
+        when {
+            back -> nav.layer = nav.menuFrom
+            k == Key.DirectionDown -> nav.menuIdx = (nav.menuIdx + 1).coerceAtMost(nav.menu.lastIndex)
+            k == Key.DirectionUp -> nav.menuIdx = (nav.menuIdx - 1).coerceAtLeast(0)
+            ok -> {
+                val item = nav.menu.getOrNull(nav.menuIdx)
+                nav.layer = nav.menuFrom
+                item?.run?.invoke()
+                fitGrid()
+            }
+        }
+        return true
+    }
+
+    /** An app on the move: arrows carry it (Up / Down too in the Apps grid), OK or Back leave it there. */
+    private fun moveKey(pkg: String, k: Key, ok: Boolean, back: Boolean): Boolean {
+        val row = rows.getOrNull(nav.row)
+        if (ok || back || row == null || nav.zone != Zone.ROWS) {
+            nav.moving = null
+            vm.saveAppsOrder()
+            return true
+        }
+        val grid = row.kind == RowKind.APP_GRID
+        val to = when (k) {
+            Key.DirectionLeft -> nav.col - 1
+            Key.DirectionRight -> nav.col + 1
+            Key.DirectionUp -> if (grid) nav.col - Geo.GRID_COLS else return true
+            Key.DirectionDown -> if (grid) nav.col + Geo.GRID_COLS else return true
+            else -> return true
+        }.coerceIn(0, row.tiles.lastIndex)
+        if (to != nav.col) {
+            vm.moveApp(pkg, to)
+            nav.col = to
+        }
+        return true
+    }
+
+    /** A title taken out of the bookmarks leaves their grid: keep the focus inside it, or leave it once empty. */
+    private fun fitGrid() {
+        if (nav.layer != Layer.GRID) return
+        if (vm.grid.isEmpty()) nav.layer = Layer.NONE else nav.gridIdx = nav.gridIdx.coerceAtMost(vm.grid.lastIndex)
     }
 
     private fun trailer(key: String) {
