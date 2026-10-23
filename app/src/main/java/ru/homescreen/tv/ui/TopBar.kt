@@ -124,7 +124,8 @@ private fun Widget(weather: Weather?, place: Place, modifier: Modifier) {
         }
     }
     // The city under the clock and the weather, below the row's own height: the clock stays level with the tabs.
-    if (place.city.isNotEmpty()) BasicText(place.city, Modifier.align(Alignment.BottomStart).offset(y = 30.u),
+    // `hs_off city` hides it, for screenshots that should not tell where the TV is.
+    if (place.city.isNotEmpty() && "city" !in DebugOff.set) BasicText(place.city, Modifier.align(Alignment.BottomStart).offset(y = 30.u),
         style = text(20, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow)))
     }
 }

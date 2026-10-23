@@ -6,6 +6,14 @@
 
 **Установка:** [docs/INSTALL.md](docs/INSTALL.md) — по шагам сами или с помощью Claude.
 
+![Главная](docs/screenshots/home.jpg)
+
+| | |
+|---|---|
+| ![Ряд подборки](docs/screenshots/rows.jpg)<br>Ряд подборки: блок сверху показывает фильм в фокусе | ![Жанры](docs/screenshots/genres.jpg)<br>Жанры на вкладках «Фильмы» и «Сериалы» |
+| ![Экран «Смотреть»](docs/screenshots/watch.jpg)<br>«Смотреть»: источник, сезон, озвучка, серии | ![Выбор источника](docs/screenshots/sources.jpg)<br>Источники Showy с лучшим качеством |
+| ![Поиск](docs/screenshots/search.jpg)<br>Поиск: клавиатура РУ/EN и голос | ![Настройки](docs/screenshots/settings.jpg)<br>Шестерёнка: сервер Showy и настройки Android |
+
 ## Что умеет
 
 - **Главная, Фильмы, Сериалы, Приложения.** Большой блок с фоном и логотипом фильма, ряды подборок: тренды недели,

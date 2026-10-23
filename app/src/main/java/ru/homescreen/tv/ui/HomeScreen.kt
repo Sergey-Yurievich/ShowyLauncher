@@ -68,7 +68,7 @@ fun HomeScreen(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voicePre
     CompositionLocalProvider(LocalScale provides scale) { Home(vm, homePresses, inputsPresses, voicePresses) }
 }
 
-/** Debug switch for profiling on the TV: `settings put global hs_off bg,scrim,pool,hero,rows,top`. */
+/** Debug switch for profiling on the TV: `settings put global hs_off bg,scrim,pool,hero,rows,top` (and `city`). */
 private var OFF: Set<String> = emptySet()
 
 @Composable
