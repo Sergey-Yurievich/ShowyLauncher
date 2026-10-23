@@ -29,7 +29,7 @@ if [ -z "$APK" ]; then
     echo "Скачиваю последнюю версию с GitHub…"
     mkdir -p build
     APK=build/ShowyLauncher.apk
-    curl -fL --progress-bar -o "$APK" "$RELEASE_URL" || die "не удалось скачать $RELEASE_URL"
+    curl -fsSL -o "$APK" "$RELEASE_URL" || die "не удалось скачать $RELEASE_URL"
   fi
 fi
 [ -f "$APK" ] || die "нет файла $APK"
