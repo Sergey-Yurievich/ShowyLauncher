@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import ru.homescreen.tv.HomeViewModel
 import ru.homescreen.tv.SearchSession
 import ru.homescreen.tv.Tab
@@ -99,6 +100,11 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
             nav.layer = Layer.NONE; nav.tab = Tab.HOME; nav.zone = Zone.HERO; nav.row = 0; nav.col = 0
         }
         focus.requestFocus()
+    }
+
+    // An update that could not be installed says why.
+    LaunchedEffect(ru.homescreen.tv.Updater.problem) {
+        ru.homescreen.tv.Updater.problem?.let { nav.toast = it; ru.homescreen.tv.Updater.problem = null }
     }
 
     // The remote's Input button, from anywhere: the Inputs menu over Home.
@@ -213,7 +219,7 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         if ("rows" !in OFF) Rows(rows, nav, rowsMode, rowsTop, nav.trailer, vm, accent)
         if ("top" !in OFF) TopBar(nav, vm.weather, vm.place, console, visible = !nav.trailer || nav.zone == Zone.TOP)
         InputsMenu(nav.layer == Layer.INPUTS, vm.inputs, nav.inputIdx)
-        SettingsMenu(nav.layer == Layer.SETTINGS, vm.server, nav.settingsIdx)
+        SettingsMenu(nav.layer == Layer.SETTINGS, vm.server, nav.settingsIdx, ru.homescreen.tv.Updater.available?.version, ru.homescreen.tv.Updater.busy)
         GridScreen(nav.layer == Layer.GRID, vm.gridTitle, vm.grid, nav.gridIdx, vm.gridLoading, accent) { vm.newEpisode(it, short = true) }
         SearchScreen(vm.search, vm.voice, nav.layer == Layer.SEARCH)
         WatchScreen(vm.watch, vm.watch?.let { vm.details[it.title.key] }, nav.layer == Layer.WATCH,
@@ -298,7 +304,10 @@ private class Actions(
             TopItem.YOUTUBE -> if (!Apps.launchPackage(ctx, YOUTUBE)) nav.toast = "YouTube не установлен"
             TopItem.CONSOLE -> console?.let { if (!Inputs.open(ctx, it)) nav.toast = "Не удалось переключить вход" }
             TopItem.INPUTS -> { nav.layer = Layer.INPUTS; nav.inputIdx = 0 }
-            TopItem.SETTINGS -> { nav.layer = Layer.SETTINGS; nav.settingsIdx = vm.server.ordinal }
+            TopItem.SETTINGS -> {
+                nav.layer = Layer.SETTINGS
+                nav.settingsIdx = if (ru.homescreen.tv.Updater.available != null) 0 else vm.server.ordinal
+            }
         }
     }
 
@@ -539,16 +548,21 @@ private class Actions(
         return true
     }
 
-    /** The settings menu: the Showy servers, then Android's own settings. */
+    /** The settings menu: an update when there is one, the Showy servers, then Android's own settings. */
     private fun settingsKey(k: Key, ok: Boolean, back: Boolean): Boolean {
         val servers = Showy.Server.entries
+        val shift = if (ru.homescreen.tv.Updater.available != null) 1 else 0
         when {
             back -> nav.layer = Layer.NONE
-            k == Key.DirectionDown -> nav.settingsIdx = (nav.settingsIdx + 1).coerceAtMost(servers.size)
+            k == Key.DirectionDown -> nav.settingsIdx = (nav.settingsIdx + 1).coerceAtMost(servers.size + shift)
             k == Key.DirectionUp -> if (nav.settingsIdx == 0) nav.layer = Layer.NONE else nav.settingsIdx--
+            ok && shift == 1 && nav.settingsIdx == 0 -> {
+                nav.toast = "Скачиваю обновление…"
+                scope.launch { ru.homescreen.tv.Updater.install(ctx) }
+            }
             ok -> {
                 nav.layer = Layer.NONE
-                val s = servers.getOrNull(nav.settingsIdx)
+                val s = servers.getOrNull(nav.settingsIdx - shift)
                 if (s == null) Apps.launch(ctx, Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 else if (s != vm.server) {
                     vm.selectServer(s)

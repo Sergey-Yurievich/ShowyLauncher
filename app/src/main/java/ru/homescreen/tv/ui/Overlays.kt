@@ -101,7 +101,7 @@ fun InputsMenu(visible: Boolean, inputs: List<TvInput>, focus: Int) {
 
 /** The gear's dropdown: where films are looked for (the Showy server), then Android's own settings. */
 @Composable
-fun SettingsMenu(visible: Boolean, current: Showy.Server, focus: Int) {
+fun SettingsMenu(visible: Boolean, current: Showy.Server, focus: Int, update: String?, updating: Boolean) {
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
         val shape = RoundedCornerShape(30.u)
         Box(Modifier.fillMaxSize()) {
@@ -113,12 +113,18 @@ fun SettingsMenu(visible: Boolean, current: Showy.Server, focus: Int) {
                     .padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
             ) {
+                // A newer release first: the menu opens on it.
+                val shift = if (update != null) 1 else 0
+                if (update != null) {
+                    MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", null, Icons.Down, focus == 0, false)
+                    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
+                }
                 BasicText("Источник фильмов", modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(19, 500, Colors.Muted))
                 Showy.Server.entries.forEachIndexed { i, s ->
-                    MenuRow(s.label, s.host.substringAfter("//"), null, i == focus, s == current)
+                    MenuRow(s.label, s.host.substringAfter("//"), null, i + shift == focus, s == current)
                 }
                 Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
-                MenuRow("Настройки Android", null, Icons.Settings, focus == Showy.Server.entries.size, false)
+                MenuRow("Настройки Android", null, Icons.Settings, focus == Showy.Server.entries.size + shift, false)
             }
         }
     }

@@ -91,6 +91,8 @@ fun TopBar(nav: Nav, weather: Weather?, place: Place, console: Pair<TvInput, Inp
                     active && nav.top == TopItem.CONSOLE, live = input.connected == true)
             }
             IconItem(Icons.Inputs, "Входы", active && nav.top == TopItem.INPUTS)
+            // A newer version waits in the gear menu.
+            ru.homescreen.tv.Updater.available?.let { BasicText("Доступна ${it.version}", style = text(19, 500, Colors.Muted).merge(TextStyle(shadow = TextShadow))) }
             IconItem(Icons.Settings, "Настройки", active && nav.top == TopItem.SETTINGS)
         }
     }

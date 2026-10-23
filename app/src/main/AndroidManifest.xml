@@ -6,6 +6,8 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Voice search: Google TV's recognizer listens on the remote's microphone for us (VoiceInput). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Updates from GitHub releases, when asked in the gear menu (Updater). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Granted over adb only (scripts/install.sh): the launcher re-enables its remote-buttons service (KeysService). -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
@@ -98,6 +100,11 @@
                 <action android:name="android.speech.RecognitionService" />
             </intent-filter>
         </service>
+
+        <!-- The installer's answer to an update (Updater). -->
+        <receiver
+            android:name=".Updater$StatusReceiver"
+            android:exported="false" />
 
         <!-- The remote's Settings and Input buttons, which only the stock home answered; see KeysService. -->
         <service

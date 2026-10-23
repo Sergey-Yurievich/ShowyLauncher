@@ -87,6 +87,7 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
   2. `./gradlew assembleRelease`.
   3. `gh release create vX.Y app/build/outputs/apk/release/app-release.apk#ShowyLauncher.apk`.
 
-  Файл в релизе должен называться `ShowyLauncher.apk`: `install.sh` качает
+  Тег — `v` + `versionName` (например `v1.2`): лаунчеры сравнивают его со своей версией (`Updater`) и предлагают
+  обновиться в меню шестерёнки. Файл в релизе должен называться `ShowyLauncher.apk`: его же ищет `Updater`, а `install.sh` качает
   `releases/latest/download/ShowyLauncher.apk`. Релизы подписаны ключом мейнтейнера. Сборка с другим ключом не встанет
   поверх уже установленного лаунчера.

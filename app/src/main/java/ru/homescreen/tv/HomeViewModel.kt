@@ -145,6 +145,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             refreshCatalog()
             prefetchFeatured()
         }
+        // A newer release on GitHub shows in the gear menu; it is installed only when asked.
+        viewModelScope.launch {
+            while (true) {
+                Updater.check()
+                delay(12 * 3600_000L)
+            }
+        }
         viewModelScope.launch {
             var locatedAt = 0L
             while (true) {

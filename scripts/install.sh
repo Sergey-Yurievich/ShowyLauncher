@@ -36,7 +36,10 @@ fi
 
 # Push + pm install instead of `adb install`: on Google TV that can wait forever for an on-screen confirmation.
 A push "$APK" /data/local/tmp/showylauncher.apk >/dev/null
-out=$(sh_out pm install -r -g /data/local/tmp/showylauncher.apk 2>&1 || true)
+# The launcher as its own installer of record: on Android 12+ it then updates itself from the gear menu without a
+# system prompt. A package that is not installed yet cannot be named as installer, so a first install goes in twice.
+installed "$PKG" || sh_out pm install -r -g /data/local/tmp/showylauncher.apk >/dev/null 2>&1 || true
+out=$(sh_out pm install -r -g -i "$PKG" /data/local/tmp/showylauncher.apk 2>&1 || true)
 A shell rm -f /data/local/tmp/showylauncher.apk
 case "$out" in
   *Success*) echo "Установлено: $(sh_out dumpsys package $PKG | grep -m1 versionName | tr -d ' ')" ;;
@@ -45,6 +48,8 @@ case "$out" in
 esac
 # The TV provider (Live TV channels); install-time on some firmware, then this grant fails harmlessly.
 A shell pm grant "$PKG" com.android.providers.tv.permission.READ_EPG_DATA >/dev/null 2>&1 || true
+# «Install unknown apps» for the launcher: its updates from GitHub (gear menu → «Обновить»).
+A shell appops set "$PKG" REQUEST_INSTALL_PACKAGES allow >/dev/null 2>&1 || true
 # Lets the launcher put its remote-buttons service back when force-stopping it has cleared the list (KeysService).
 A shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1 || true
 
