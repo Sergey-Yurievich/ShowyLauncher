@@ -89,7 +89,9 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
 - **Выпуск версии:**
   1. Поднять `versionCode` и `versionName` в `app/build.gradle.kts`.
   2. `./gradlew assembleRelease`.
-  3. `gh release create vX.Y app/build/outputs/apk/release/app-release.apk#ShowyLauncher.apk`.
+  3. `cp app/build/outputs/apk/release/app-release.apk build/ShowyLauncher.apk`, потом
+     `gh release create vX.Y build/ShowyLauncher.apk --title "ShowyLauncher X.Y" --notes-file <заметки>`. Не
+     `app-release.apk#ShowyLauncher.apk`: суффикс `#` у `gh` задаёт только подпись, файл останется `app-release.apk`.
 
   Тег — `v` + `versionName` (например `v1.2`): лаунчеры сравнивают его со своей версией (`Updater`) и предлагают
   обновиться в меню шестерёнки. Файл в релизе должен называться `ShowyLauncher.apk`: его же ищет `Updater`, а `install.sh` качает
