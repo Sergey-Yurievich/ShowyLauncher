@@ -14,6 +14,7 @@ import ru.homescreen.tv.data.Details
 import ru.homescreen.tv.data.Episode
 import ru.homescreen.tv.data.History
 import ru.homescreen.tv.data.Media
+import ru.homescreen.tv.data.Person
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
@@ -34,7 +35,8 @@ class WatchSession(
 ) {
     enum class Phase { LOADING, AUTH, DENIED, READY, ERROR }
     enum class Chip { SOURCE, SEASON, VOICE, TRAILER, BOOKMARK }
-    enum class Zone { CHIPS, LIST, RELATED }
+    /** Top to bottom, as on screen. */
+    enum class Zone { CHIPS, LIST, CAST, RELATED }
 
     var phase by mutableStateOf(Phase.LOADING)
         private set
@@ -77,8 +79,15 @@ class WatchSession(
     var related by mutableStateOf<List<Title>>(emptyList())
         private set
     var relIdx by mutableIntStateOf(0)
-    /** Back from a title opened from «Похожее»: the focus returns to the poster it was opened from. Set before [start]. */
-    var resumeRelated = -1
+    /** «В ролях» between the list and «Похожее»: OK on an actor opens their films. */
+    var cast by mutableStateOf<List<Person>>(emptyList())
+        private set
+    var castIdx by mutableIntStateOf(0)
+    /**
+     * Back from a title opened from «В ролях» or «Похожее»: the focus returns to the actor or poster it was opened from
+     * (that row and its index). Set before [start].
+     */
+    var resume: Pair<Zone, Int>? = null
 
     /** TMDB episodes by season number, for names, length and rating. */
     val episodes = mutableStateMapOf<Int, Map<Int, Episode>>()
@@ -116,17 +125,23 @@ class WatchSession(
     fun start() {
         jobs += scope.launch { if (Showy.token.isEmpty()) auth() else load() }
         jobs += scope.launch {
+            val list = Tmdb.cast(title) ?: return@launch
+            cast = list
+            resume?.takeIf { it.first == Zone.CAST && list.isNotEmpty() }?.let { castIdx = it.second.coerceAtMost(list.lastIndex); zone = Zone.CAST }
+        }
+        jobs += scope.launch {
             val list = Tmdb.related(title) ?: return@launch
             related = list
-            if (resumeRelated >= 0 && list.isNotEmpty()) {
-                relIdx = resumeRelated.coerceAtMost(list.lastIndex)
-                zone = Zone.RELATED
-            }
+            resume?.takeIf { it.first == Zone.RELATED && list.isNotEmpty() }?.let { relIdx = it.second.coerceAtMost(list.lastIndex); zone = Zone.RELATED }
         }
     }
 
-    /** The row is there once loaded, except over the Showy code (its QR code fills the space). */
+    /** The rows are there once loaded, except over the Showy code (its QR code fills the space). */
+    val castShown: Boolean get() = cast.isNotEmpty() && phase != Phase.AUTH
     val relatedShown: Boolean get() = related.isNotEmpty() && phase != Phase.AUTH
+
+    /** The first row under the list, where Down goes from its end; null when neither is there. */
+    fun below(): Zone? = if (castShown) Zone.CAST else if (relatedShown) Zone.RELATED else null
 
     fun close() {
         jobs.forEach { it.cancel() }
@@ -302,8 +317,8 @@ class WatchSession(
             }
             if (list.isEmpty()) note = if (answered) "Источник ничего не нашёл. Выберите другой." else "Источник не ответил. Выберите другой."
             idx = startIndex()
-            // The focus may already be down in «Похожее» (back from one of its titles): the files do not take it.
-            if (zone != Zone.RELATED) { if (list.isEmpty()) zone = Zone.CHIPS else if (picker == null) zone = Zone.LIST }
+            // The focus may already be down in «В ролях» or «Похожее» (back from one of their titles): the files do not take it.
+            if (zone != Zone.CAST && zone != Zone.RELATED) { if (list.isEmpty()) zone = Zone.CHIPS else if (picker == null) zone = Zone.LIST }
         }
     }
 

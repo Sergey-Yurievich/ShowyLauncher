@@ -119,6 +119,41 @@ object Tmdb {
         return list.distinctBy { it.key }.filter { it.key != t.key }.take(20)
     }
 
+    /**
+     * «В ролях»: a film's cast in billing order, a series' across all its seasons by the episodes they are in. Null when
+     * TMDB did not answer.
+     */
+    suspend fun cast(t: Title): List<Person>? {
+        val tv = t.media == Media.TV
+        val j = get(if (tv) "tv/${t.id}/aggregate_credits" else "movie/${t.id}/credits") ?: return null
+        val list = ArrayList<JSONObject>()
+        j.optJSONArray("cast").forEachObj { if (it.optString("name").isNotEmpty()) list.add(it) }
+        if (tv) list.sortByDescending { it.optInt("total_episode_count") }
+        return list.map { Person(it.optInt("id"), it.optString("name"), it.optString("profile_path").takeIf { p -> p.startsWith("/") }) }
+            .distinctBy { it.id }.take(20)
+    }
+
+    /** Talk shows, news and reality: an actor is there as themselves. */
+    private val NOT_ROLES = setOf(10767, 10763, 10764)
+    private val SELF = Regex("\\b(self|himself|herself|themselves)\\b", RegexOption.IGNORE_CASE)
+
+    /**
+     * An actor's films and series, best known (most voted) first, without appearances as themselves. Null when TMDB did
+     * not answer.
+     */
+    suspend fun filmography(personId: Int): List<Title>? {
+        val j = get("person/$personId/combined_credits") ?: return null
+        val roles = JSONArray()
+        val votes = HashMap<String, Int>()
+        j.optJSONArray("cast").forEachObj { c ->
+            if (SELF.containsMatchIn(c.optString("character")) || c.optJSONArray("genre_ids").ints().any { it in NOT_ROLES }) return@forEachObj
+            roles.put(c)
+            val key = c.optString("media_type") + "_" + c.optInt("id")
+            votes[key] = maxOf(votes[key] ?: 0, c.optInt("vote_count"))
+        }
+        return clean(roles, null).distinctBy { it.key }.sortedByDescending { votes[it.key] ?: 0 }
+    }
+
     /** TMDB's stand-in names ("Эпизод 3", "1 глава", "Episode 3") say nothing the episode number does not. */
     private val GENERIC_EPISODE = Regex("^(\\d+\\s*)?(серия|эпизод|глава|episode|chapter)(\\s*\\d+)?\\.?$", RegexOption.IGNORE_CASE)
 

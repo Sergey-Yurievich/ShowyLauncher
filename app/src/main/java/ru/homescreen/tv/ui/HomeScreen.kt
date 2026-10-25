@@ -114,6 +114,15 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         vm.sync.note?.let { nav.toast = it; vm.sync.note = null }
     }
 
+    // An actor TMDB knows no films of (or no answer): back to the film's screen, saying why.
+    val person = vm.person
+    LaunchedEffect(person, person?.loading) {
+        if (person != null && !person.loading && person.titles.isEmpty() && nav.layer == Layer.PERSON) {
+            nav.layer = Layer.WATCH
+            nav.toast = if (person.failed) "TMDB не отвечает" else "Фильмов не нашлось"
+        }
+    }
+
     // The remote's Input button, from anywhere: the Inputs menu over Home.
     LaunchedEffect(inputsPresses) {
         if (inputsPresses > 0) {
@@ -248,6 +257,8 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
             bookmarked = vm.watch?.let { vm.isBookmarked(it.title.key) } == true, newEpisode = vm.watch?.let { vm.newEpisode(it.title) }, accent = accent) {
             vm.newEpisode(it, short = true)
         }
+        GridScreen(nav.base == Layer.PERSON, person?.person?.name ?: "", person?.titles.orEmpty(), person?.idx ?: 0, person?.loading == true,
+            accent, person = person?.person) { vm.newEpisode(it, short = true) }
         ContextMenu(nav.layer == Layer.MENU, nav.menu, nav.menuIdx)
         Toast(nav)
     }
@@ -275,6 +286,7 @@ private class Actions(
             Layer.WATCH -> return watchKey(k, ok, back)
             Layer.SEARCH -> return searchKey(k, ok, back)
             Layer.MENU -> return menuKey(k, ok, back)
+            Layer.PERSON -> return personKey(k, ok, back)
             Layer.NONE -> {}
         }
         nav.moving?.let { return moveKey(it, k, ok, back) }
@@ -510,8 +522,11 @@ private class Actions(
             return true
         }
         if (back) {
-            // A title opened from «Похожее» goes back to the one it came from.
-            if (vm.backFromWatch()) return true
+            // A title opened from «Похожее» or an actor's films goes back to where it came from.
+            if (vm.backFromWatch()) {
+                if (vm.person != null) nav.layer = Layer.PERSON
+                return true
+            }
             vm.closeWatch()
             nav.layer = nav.watchFrom
             fitGrid()
@@ -521,7 +536,7 @@ private class Actions(
         // Before the sources are in (or when they failed) only the pills work: Up reaches them, OK below them retries.
         if (w.phase != WatchSession.Phase.READY && w.zone == WatchSession.Zone.LIST) {
             if (k == Key.DirectionUp) { w.zone = WatchSession.Zone.CHIPS; w.chip = w.chip.coerceIn(0, (chips.size - 1).coerceAtLeast(0)) }
-            else if (k == Key.DirectionDown && w.relatedShown) w.zone = WatchSession.Zone.RELATED
+            else if (k == Key.DirectionDown) w.below()?.let { w.zone = it }
             else if (ok) w.retry()
             return true
         }
@@ -530,7 +545,7 @@ private class Actions(
                 k == Key.DirectionLeft -> w.chip = (w.chip - 1).coerceAtLeast(0)
                 k == Key.DirectionRight -> w.chip = (w.chip + 1).coerceAtMost((chips.size - 1).coerceAtLeast(0))
                 k == Key.DirectionDown -> if (w.list.isNotEmpty() || w.phase != WatchSession.Phase.READY) w.zone = WatchSession.Zone.LIST
-                    else if (w.relatedShown) w.zone = WatchSession.Zone.RELATED
+                    else w.below()?.let { w.zone = it }
                 ok -> chips.getOrNull(w.chip)?.let { c ->
                     if (c == WatchSession.Chip.TRAILER) { w.trailer()?.let { trailer(it) }; return true }
                     if (c == WatchSession.Chip.BOOKMARK) {
@@ -552,8 +567,11 @@ private class Actions(
                     w.zone = WatchSession.Zone.CHIPS
                     w.chip = w.chip.coerceIn(0, (chips.size - 1).coerceAtLeast(0))
                 } else w.idx--
-                k == Key.DirectionDown -> if (w.idx >= w.list.lastIndex && w.relatedShown) w.zone = WatchSession.Zone.RELATED
+                k == Key.DirectionDown -> {
+                    val below = w.below()
+                    if (w.idx >= w.list.lastIndex && below != null) w.zone = below
                     else w.idx = (w.idx + 1).coerceAtMost((w.list.size - 1).coerceAtLeast(0))
+                }
                 ok -> when {
                     w.files.isNotEmpty() -> if (!Vimu.installed(ctx)) nav.toast = "ViMu не установлен" else w.play(w.idx) { i, done ->
                         (ctx as? ru.homescreen.tv.MainActivity)?.forResult(i, done) ?: false
@@ -561,10 +579,17 @@ private class Actions(
                     else -> w.similar.getOrNull(w.idx)?.let { w.selectSimilar(it) }
                 }
             }
+            WatchSession.Zone.CAST -> when {
+                k == Key.DirectionLeft -> w.castIdx = (w.castIdx - 1).coerceAtLeast(0)
+                k == Key.DirectionRight -> w.castIdx = (w.castIdx + 1).coerceAtMost(w.cast.lastIndex.coerceAtLeast(0))
+                k == Key.DirectionUp -> w.zone = aboveRows(w)
+                k == Key.DirectionDown -> if (w.relatedShown) w.zone = WatchSession.Zone.RELATED
+                ok -> w.cast.getOrNull(w.castIdx)?.let { vm.openPerson(it); nav.layer = Layer.PERSON }
+            }
             WatchSession.Zone.RELATED -> when {
                 k == Key.DirectionLeft -> w.relIdx = (w.relIdx - 1).coerceAtLeast(0)
                 k == Key.DirectionRight -> w.relIdx = (w.relIdx + 1).coerceAtMost(w.related.lastIndex.coerceAtLeast(0))
-                k == Key.DirectionUp -> w.zone = if (w.list.isNotEmpty() || w.phase != WatchSession.Phase.READY) WatchSession.Zone.LIST else WatchSession.Zone.CHIPS
+                k == Key.DirectionUp -> w.zone = if (w.castShown) WatchSession.Zone.CAST else aboveRows(w)
                 ok -> w.related.getOrNull(w.relIdx)?.let { t ->
                     val d = vm.details[t.key]
                     vm.openRelated(t.copy(poster = t.poster ?: d?.poster, backdrop = t.backdrop ?: d?.backdrop))
@@ -573,6 +598,10 @@ private class Actions(
         }
         return true
     }
+
+    /** Up from the first row under the list: the list, or the pills when there is none. */
+    private fun aboveRows(w: WatchSession) =
+        if (w.list.isNotEmpty() || w.phase != WatchSession.Phase.READY) WatchSession.Zone.LIST else WatchSession.Zone.CHIPS
 
     private fun inputsKey(k: Key, ok: Boolean, back: Boolean): Boolean {
         val list = vm.inputs
@@ -650,6 +679,7 @@ private class Actions(
             Layer.GRID -> vm.grid.getOrNull(nav.gridIdx)?.let { titleMenu(it) }
             Layer.SEARCH -> if (vm.search.zone == SearchSession.Zone.RESULTS) vm.search.results.getOrNull(vm.search.idx)?.let { titleMenu(it) } else null
             Layer.WATCH -> watchMenu()
+            Layer.PERSON -> vm.person?.let { g -> g.titles.getOrNull(g.idx)?.let { titleMenu(it) } }
             else -> null
         }
         return nav.openMenu(items.orEmpty())
@@ -753,17 +783,39 @@ private class Actions(
     }
 
     private fun gridKey(k: Key, ok: Boolean, back: Boolean): Boolean {
-        val n = vm.grid.size
-        val cols = 7
         when {
             back -> nav.layer = Layer.NONE
-            k == Key.DirectionRight -> if (nav.gridIdx % cols < cols - 1 && nav.gridIdx + 1 < n) nav.gridIdx++
-            k == Key.DirectionLeft -> if (nav.gridIdx % cols > 0) nav.gridIdx--
-            k == Key.DirectionDown -> if (nav.gridIdx + cols < n) nav.gridIdx += cols else if (nav.gridIdx / cols < (n - 1) / cols) nav.gridIdx = n - 1
-            k == Key.DirectionUp -> if (nav.gridIdx >= cols) nav.gridIdx -= cols
             ok -> vm.grid.getOrNull(nav.gridIdx)?.let { watch(it) }
+            else -> nav.gridIdx = gridMove(nav.gridIdx, vm.grid.size, k)
         }
         vm.gridFocus(nav.gridIdx)
         return true
+    }
+
+    /** An actor's films: Back returns to the film's screen, on the actor; a title opens over it. */
+    private fun personKey(k: Key, ok: Boolean, back: Boolean): Boolean {
+        val g = vm.person ?: run { nav.layer = Layer.WATCH; return true }
+        when {
+            back -> nav.layer = Layer.WATCH
+            ok -> g.titles.getOrNull(g.idx)?.let { t ->
+                val d = vm.details[t.key]
+                vm.openFromPerson(t.copy(poster = t.poster ?: d?.poster, backdrop = t.backdrop ?: d?.backdrop))
+                nav.layer = Layer.WATCH
+            }
+            else -> g.idx = gridMove(g.idx, g.titles.size, k)
+        }
+        return true
+    }
+
+    /** An arrow in a 7-wide poster grid of [n]: the new focus. Down from a short last line's column goes to its end. */
+    private fun gridMove(i: Int, n: Int, k: Key): Int {
+        val cols = 7
+        return when (k) {
+            Key.DirectionRight -> if (i % cols < cols - 1 && i + 1 < n) i + 1 else i
+            Key.DirectionLeft -> if (i % cols > 0) i - 1 else i
+            Key.DirectionDown -> if (i + cols < n) i + cols else if (i / cols < (n - 1) / cols) n - 1 else i
+            Key.DirectionUp -> if (i >= cols) i - cols else i
+            else -> i
+        }
     }
 }

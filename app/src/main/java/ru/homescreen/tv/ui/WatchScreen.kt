@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -39,6 +40,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.em
 import coil.compose.AsyncImage
@@ -47,6 +49,7 @@ import ru.homescreen.tv.WatchSession.Chip
 import ru.homescreen.tv.WatchSession.Phase
 import ru.homescreen.tv.WatchSession.Zone
 import ru.homescreen.tv.data.Details
+import ru.homescreen.tv.data.Person
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
@@ -57,10 +60,15 @@ private const val PILLS_Y = 340f
 private const val LIST_Y = 430f
 private const val ROW_H = 72f
 private const val ROW_GAP = 8f
-/** «Похожее»: its title, then posters as on Home. */
+/** «В ролях» and «Похожее»: the row's title, then round photos with names / posters as on Home. */
 private const val REL_TITLE = 52f
 private const val POSTER_W = 200f
 private const val POSTER_H = 300f
+private const val PHOTO = 160f
+private const val CAST_W = 180f
+/** A photo and two lines of the name under it. */
+private const val CAST_H = PHOTO + 14f + 56f
+private const val ROWS_GAP = 40f
 
 /**
  * The film's screen: logo, facts and overview on top, then source, season, voice (and trailer) as pills, then the
@@ -79,16 +87,22 @@ fun WatchScreen(
             Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
                 0f to Color(0xFA050608), 0.5f to Color(0xE6050608), 1f to Color(0x8C050608))))
 
-            // «Похожее» sits right under the files (or the message); a long list pushes it below the screen, and the page
-            // scrolls up while the focus is in it.
-            val relTop = when (s.phase) {
+            // «В ролях», then «Похожее», sit right under the files (or the message); a long list pushes them below the screen,
+            // and the page scrolls up while the focus is in one.
+            val castTop = when (s.phase) {
                 Phase.READY -> LIST_Y + minOf(s.list.size, ROWS) * (ROW_H + ROW_GAP) + (if (s.note.isNotEmpty()) 60f else 0f) + 34f
                 Phase.ERROR -> LIST_Y + 120f
                 else -> LIST_Y + 80f
             }
+            val relTop = if (s.castShown) castTop + REL_TITLE + CAST_H + ROWS_GAP else castTop
+            val inCast = s.zone == Zone.CAST && s.castShown
             val inRelated = s.zone == Zone.RELATED && s.relatedShown
-            val scroll = animateFloatAsState(if (inRelated) (relTop + REL_TITLE + POSTER_H + 56f - 1080f).coerceAtLeast(0f) else 0f,
-                tween(450, easing = FastOutSlowInEasing), label = "ws")
+            val bottom = when {
+                inCast -> castTop + REL_TITLE + CAST_H
+                inRelated -> relTop + REL_TITLE + POSTER_H
+                else -> 0f
+            }
+            val scroll = animateFloatAsState((bottom + 56f - 1080f).coerceAtLeast(0f), tween(450, easing = FastOutSlowInEasing), label = "ws")
             Box(Modifier.fillMaxSize().graphicsLayer { translationY = -scroll.value * LocalScaleHolder.px }) {
                 Box(Modifier.offset(x = 96.u, y = 70.u)) { LogoTitle(s.title.name, Tmdb.img(d?.logo, "w500"), 76f, maxW = 820, maxH = 110) }
                 Column(Modifier.offset(x = 96.u, y = 196.u).width(1040.u), verticalArrangement = Arrangement.spacedBy(12.u)) {
@@ -105,7 +119,10 @@ fun WatchScreen(
                     Phase.DENIED, Phase.ERROR -> Message(s.message, if (s.phase == Phase.ERROR) "OK — попробовать ещё раз" else null)
                     Phase.READY -> Ready(s)
                 }
+                if (s.castShown) Cast(s, castTop, inCast, accent)
                 if (s.relatedShown) Related(s, relTop, inRelated, accent, badge)
+                // Last, so the rows under the list do not cover it.
+                if (s.phase == Phase.READY) s.picker?.let { Picker(s, it) }
             }
         }
     }
@@ -164,8 +181,6 @@ private fun Ready(s: WatchSession) {
         }
         if (s.note.isNotEmpty()) BasicText(s.note, modifier = Modifier.padding(start = 16.u, top = 12.u), style = text(25, 400, Colors.Muted))
     }
-
-    s.picker?.let { Picker(s, it) }
 }
 
 /** «Похожее»: TMDB's recommendations as a poster row; scrolls like a row on Home, the focused poster second from the left. */
@@ -199,6 +214,54 @@ private fun Related(s: WatchSession, top: Float, active: Boolean, accent: State<
                 if (f) Box(Modifier.fillMaxSize().border(3.u, Color(0xE6FFFFFF), shape))
             }
         }
+    }
+}
+
+/** «В ролях»: the actors' photos with their names; scrolls as «Похожее» does. */
+@Composable
+private fun Cast(s: WatchSession, top: Float, active: Boolean, accent: State<Color>) {
+    val step = CAST_W + 20f
+    val max = (s.cast.size * step - (1920f - 96f * 2) + 20f).coerceAtLeast(0f)
+    val shift = animateFloatAsState(((s.castIdx - 1) * step).coerceIn(0f, max), tween(340, easing = FastOutSlowInEasing), label = "cast")
+    BasicText("В ролях", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(27, 600, Color(0xEBECEFF5)))
+    Row(
+        Modifier.offset(y = (top + REL_TITLE).u).wrapContentWidth(Alignment.Start, unbounded = true)
+            .graphicsLayer {
+                translationX = (96f - shift.value) * LocalScaleHolder.px
+                alpha = if (active) 1f else 0.6f
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            },
+        horizontalArrangement = Arrangement.spacedBy(20.u),
+    ) {
+        s.cast.forEachIndexed { i, p -> Actor(p, active && i == s.castIdx, accent) }
+    }
+}
+
+@Composable
+private fun Actor(p: Person, focused: Boolean, accent: State<Color>) {
+    val sc by animateFloatAsState(if (focused) 1.1f else 1f, label = "cs")
+    Column(Modifier.width(CAST_W.u), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.u)) {
+        Box(
+            Modifier.graphicsLayer { scaleX = sc; scaleY = sc }
+                .shadow(if (focused) 30.u else 8.u, CircleShape, ambientColor = if (focused) accent.value else Color.Black,
+                    spotColor = if (focused) accent.value else Color.Black),
+        ) {
+            Avatar(p, PHOTO)
+            if (focused) Box(Modifier.size(PHOTO.u).border(3.u, Color(0xE6FFFFFF), CircleShape))
+        }
+        BasicText(p.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            style = text(20, if (focused) 600 else 500, if (focused) Colors.Fg else Colors.Muted).merge(TextStyle(textAlign = TextAlign.Center, lineHeight = 1.3.em)))
+    }
+}
+
+/** An actor's round photo; their initials when TMDB has none. */
+@Composable
+internal fun Avatar(p: Person, size: Float) {
+    Box(Modifier.size(size.u).clip(CircleShape).background(Color(0xFF1C1F26)), contentAlignment = Alignment.Center) {
+        val url = Tmdb.img(p.photo, "w185")
+        if (url != null) AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else BasicText(p.name.split(' ').filter { it.isNotEmpty() }.take(2).joinToString("") { it.take(1) }.uppercase(),
+            style = text(size * 0.3f, 600, Colors.Muted))
     }
 }
 

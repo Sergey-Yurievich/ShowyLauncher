@@ -14,7 +14,8 @@ import ru.homescreen.tv.Tab
 import ru.homescreen.tv.data.Title
 
 enum class Zone { TOP, HERO, ROWS }
-enum class Layer { NONE, INPUTS, SETTINGS, GRID, WATCH, SEARCH, MENU }
+/** PERSON: an actor's films, over the film's screen they were opened from. */
+enum class Layer { NONE, INPUTS, SETTINGS, GRID, WATCH, SEARCH, MENU, PERSON }
 
 /** A line of the long-press menu. */
 class MenuItem(val label: String, val icon: ImageVector?, val run: () -> Unit)

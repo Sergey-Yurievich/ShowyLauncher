@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.em
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import ru.homescreen.tv.data.Details
+import ru.homescreen.tv.data.Person
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
@@ -244,16 +245,22 @@ fun plural(n: Int, one: String, few: String, many: String): String {
     return "$n $w"
 }
 
-/** «Смотреть все»: the whole collection as a poster grid. */
+/** «Смотреть все»: the whole collection as a poster grid. An actor's films have the actor's photo by the title. */
 @Composable
-fun GridScreen(visible: Boolean, title: String, items: List<Title>, focus: Int, loading: Boolean, accent: State<Color>, badge: (Title) -> String?) {
+fun GridScreen(
+    visible: Boolean, title: String, items: List<Title>, focus: Int, loading: Boolean, accent: State<Color>, person: Person? = null,
+    badge: (Title) -> String?,
+) {
     AnimatedVisibility(visible, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
         val cols = 7
         val rowH = 300f + 44f
         val fr = focus / cols
         val y by animateFloatAsState(-((fr - 1).coerceAtLeast(0)) * rowH, tween(450, easing = FastOutSlowInEasing), label = "gy")
-        Box(Modifier.fillMaxSize().background(Color(0xF2050608))) {
-            Row(Modifier.offset(x = 96.u, y = 70.u), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.u)) {
+        // Opaque: the top bar and the hero behind would show through the header.
+        Box(Modifier.fillMaxSize().background(Colors.Bg)) {
+            Row(Modifier.offset(x = 96.u, y = if (person != null) 50.u else 70.u),
+                verticalAlignment = if (person != null) Alignment.CenterVertically else Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.u)) {
+                person?.let { Avatar(it, 96f) }
                 BasicText(title, style = text(44, 800))
                 if (loading) BasicText("Загружаем ещё…", modifier = Modifier.padding(bottom = 6.u), style = text(22, 400, Colors.Muted))
             }

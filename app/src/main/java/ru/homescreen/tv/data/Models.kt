@@ -78,6 +78,9 @@ data class Details(
 /** One episode as TMDB describes it (`tv/{id}/season/{n}`). */
 data class Episode(val name: String, val runtime: Int, val vote: Double, val air: String)
 
+/** An actor of «В ролях»; [photo] is a TMDB path, see [Tmdb.img]. */
+data class Person(val id: Int, val name: String, val photo: String?)
+
 enum class CollIcon { MOON, CLOCK, DOC, TV, FAMILY, STAR }
 
 sealed interface Tile {

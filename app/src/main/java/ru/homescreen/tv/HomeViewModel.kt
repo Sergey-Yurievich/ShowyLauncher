@@ -3,6 +3,7 @@ package ru.homescreen.tv
 import android.app.Application
 import android.graphics.drawable.BitmapDrawable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import ru.homescreen.tv.data.Inputs
 import ru.homescreen.tv.data.Lampa
 import ru.homescreen.tv.data.Media
 import ru.homescreen.tv.data.MoreTile
+import ru.homescreen.tv.data.Person
 import ru.homescreen.tv.data.Place
 import ru.homescreen.tv.data.Releases
 import ru.homescreen.tv.data.Row
@@ -358,26 +360,59 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openWatch(t: Title, resumeRelated: Int = -1) {
+    fun openWatch(t: Title, resume: Pair<WatchSession.Zone, Int>? = null) {
         watch?.close()
         requestDetails(t)
         watch = WatchSession(t, viewModelScope, history, ::freshDetails, { details[t.key] }) { refreshContinue() }
-            .also { it.resumeRelated = resumeRelated; it.start() }
+            .also { it.resume = resume; it.start() }
     }
 
-    /** Titles opened from «Похожее» one after another, with the poster each was opened from: Back walks them back. */
-    private val watchBack = ArrayList<Pair<Title, Int>>()
+    /**
+     * A title opened from another one's screen: that title, the row and index the focus was on, and the actor's films
+     * when it came from them.
+     */
+    private class Back(val title: Title, val zone: WatchSession.Zone, val idx: Int, val person: PersonGrid?)
+
+    /** Titles opened one from another («Похожее», an actor's films): Back walks them back. */
+    private val watchBack = ArrayList<Back>()
 
     fun openRelated(t: Title) {
         val w = watch ?: return
-        watchBack += w.title to w.relIdx
+        watchBack += Back(w.title, WatchSession.Zone.RELATED, w.relIdx, null)
         openWatch(t)
     }
 
-    /** Back on a title opened from «Похожее»: the one it was opened from, focused on that poster. False at the first. */
+    /** An actor's films, over the film's screen (OK on «В ролях»); the last ones stay here after Back, as they fade out. */
+    var person by mutableStateOf<PersonGrid?>(null)
+        private set
+
+    fun openPerson(p: Person) {
+        val g = PersonGrid(p)
+        person = g
+        viewModelScope.launch {
+            val list = Tmdb.filmography(p.id)
+            g.titles.addAll(list.orEmpty())
+            g.failed = list == null
+            g.loading = false
+        }
+    }
+
+    /** A title from the actor's films: Back returns to them, and from them to the actor on the screen they came from. */
+    fun openFromPerson(t: Title) {
+        val w = watch ?: return
+        val g = person ?: return
+        watchBack += Back(w.title, WatchSession.Zone.CAST, w.castIdx, g)
+        openWatch(t)
+    }
+
+    /**
+     * Back on a title opened from another one: that one, focused where it was, with the actor's films over it when it
+     * came from them ([person]). False at the first.
+     */
     fun backFromWatch(): Boolean {
-        val (t, i) = watchBack.removeLastOrNull() ?: return false
-        openWatch(t, resumeRelated = i)
+        val b = watchBack.removeLastOrNull() ?: return false
+        openWatch(b.title, resume = b.zone to b.idx)
+        person = b.person
         return true
     }
 
@@ -385,6 +420,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         watch?.close()
         watch = null
         watchBack.clear()
+        person = null
     }
 
     /** Details with the original title and IMDb id Showy matches by; older cached entries lack them. */
@@ -649,4 +685,13 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             Triple("hits90", 320f, CollIcon.STAR),
         )
     }
+}
+
+/** An actor's films and series as a poster grid; [idx] is the focus, kept when Back returns to them. */
+class PersonGrid(val person: Person) {
+    val titles = mutableStateListOf<Title>()
+    var loading by mutableStateOf(true)
+    /** TMDB did not answer (as opposed to an actor with no films it knows of). */
+    var failed = false
+    var idx by mutableIntStateOf(0)
 }

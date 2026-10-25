@@ -66,7 +66,7 @@ ShowyLauncher — главный экран для Google TV (Kotlin + Jetpack C
   Нажатия для своего интерфейса можно слать `input keyevent` (DPAD_*, DPAD_CENTER, BACK, HOME); сессию помощника
   (кнопку микрофона) вызывает `input keyevent KEYCODE_ASSIST`.
 - **Карта кода** (`app/src/main/java/ru/homescreen/tv/`): `HomeViewModel` — состояние; `ui/HomeScreen.kt` — пульт и
-  раскладка; `ui/Nav.kt` — своя машина фокуса; `Watch.kt` + `ui/WatchScreen.kt` — экран «Смотреть»; `data/Showy.kt`,
+  раскладка; `ui/Nav.kt` — своя машина фокуса; `Watch.kt` + `ui/WatchScreen.kt` — экран «Смотреть» (под сериями ряды «В ролях» и «Похожее»; OK на актёре — его фильмы, слой `Layer.PERSON`; «Назад» по цепочке — стек `HomeViewModel.Back`); `data/Showy.kt`,
   `data/Html.kt`, `data/Rch.kt` — клиент Showy (Lampac); `data/Tmdb.kt`, `data/Catalog.kt` — TMDB и подборки;
   `VoiceInput.kt` — голосовой поиск (служба распознавания katniss); `Assistant.kt` — роль помощника (кнопка
   микрофона); `KeysService.kt` — кнопки «Настройки» и «Источник»; `data/Sync.kt` — общая история связанных ТВ
