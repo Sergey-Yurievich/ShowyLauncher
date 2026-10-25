@@ -43,6 +43,7 @@ object Icons {
     val Bookmark = build("bookmark", "M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z" to true)
     val BookmarkOn = build("bookmark_on", "M7 3.5h10a1 1 0 0 1 1 1V21l-6-4-6 4V4.5a1 1 0 0 1 1-1z" to false)
     val Down = build("down", "M6 9.5l6 6 6-6" to true)
+    val Refresh = build("refresh", "M21.35 5.2v5.1h-5.1" to true, "M19.22 14.55a7.65 7.65 0 1 1-1.8-7.96l3.93 3.71" to true)
     val Check = build("check", "M5 12.5l4.5 4.5L19 7.5" to true)
     val Close = build("close", "M6.5 6.5l11 11M17.5 6.5l-11 11" to true)
     val Left = build("left", "M14.5 6l-6 6 6 6" to true)

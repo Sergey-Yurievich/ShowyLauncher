@@ -105,8 +105,8 @@ enum class SettingsKind { UPDATE, SERVER, LINK, UNLINK, UNHIDE, ANDROID }
 /** A line of the gear menu; the menu and the remote handling build the same list ([settingsRows]). */
 data class SettingsRow(val kind: SettingsKind, val server: Showy.Server? = null)
 
-fun settingsRows(update: Boolean, linked: Boolean, hidden: Boolean): List<SettingsRow> = buildList {
-    if (update) add(SettingsRow(SettingsKind.UPDATE))
+fun settingsRows(linked: Boolean, hidden: Boolean): List<SettingsRow> = buildList {
+    add(SettingsRow(SettingsKind.UPDATE))
     Showy.Server.entries.forEach { add(SettingsRow(SettingsKind.SERVER, it)) }
     add(SettingsRow(SettingsKind.LINK))
     if (linked) add(SettingsRow(SettingsKind.UNLINK))
@@ -115,13 +115,13 @@ fun settingsRows(update: Boolean, linked: Boolean, hidden: Boolean): List<Settin
 }
 
 /**
- * The gear's dropdown: an update when there is one, where films are looked for (the Showy server), the TVs sharing
+ * The gear's dropdown: this version and a newer one when there is one (else a check on request), where films are looked for (the Showy server), the TVs sharing
  * this one's history, hidden apps to bring back, then Android's own settings.
  */
 @Composable
 fun SettingsMenu(
     visible: Boolean, rows: List<SettingsRow>, current: Showy.Server, focus: Int, update: String?, updating: Boolean,
-    pairing: Boolean, peers: List<String>, hidden: Int,
+    checking: Boolean, pairing: Boolean, peers: List<String>, hidden: Int,
 ) {
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
         val shape = RoundedCornerShape(30.u)
@@ -138,7 +138,14 @@ fun SettingsMenu(
                     val f = i == focus
                     val prev = rows.getOrNull(i - 1)?.kind
                     when (r.kind) {
-                        SettingsKind.UPDATE -> MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", null, Icons.Down, f, false)
+                        SettingsKind.UPDATE -> {
+                            val version = "Версия ${ru.homescreen.tv.BuildConfig.VERSION_NAME}"
+                            when {
+                                update != null -> MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", version, Icons.Down, f, false)
+                                checking -> MenuRow("Проверяю обновления…", version, Icons.Refresh, f, false)
+                                else -> MenuRow("Проверить обновления", version, Icons.Refresh, f, false)
+                            }
+                        }
                         SettingsKind.SERVER -> {
                             if (prev != SettingsKind.SERVER) {
                                 if (prev != null) MenuDivider()

@@ -250,7 +250,7 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         if ("top" !in OFF) TopBar(nav, vm.weather, vm.place, console, visible = !nav.trailer || nav.zone == Zone.TOP)
         InputsMenu(nav.layer == Layer.INPUTS, vm.inputs, nav.inputIdx)
         SettingsMenu(nav.layer == Layer.SETTINGS, actions.settings(), vm.server, nav.settingsIdx, ru.homescreen.tv.Updater.available?.version,
-            ru.homescreen.tv.Updater.busy, vm.sync.pairing, vm.sync.peers.map { it.name }, vm.hiddenApps.size)
+            ru.homescreen.tv.Updater.busy, ru.homescreen.tv.Updater.checking, vm.sync.pairing, vm.sync.peers.map { it.name }, vm.hiddenApps.size)
         GridScreen(nav.base == Layer.GRID, vm.gridTitle, vm.grid, nav.gridIdx, vm.gridLoading, accent) { vm.newEpisode(it, short = true) }
         SearchScreen(vm.search, vm.voice, nav.base == Layer.SEARCH)
         WatchScreen(vm.watch, vm.watch?.let { vm.details[it.title.key] }, nav.base == Layer.WATCH,
@@ -347,7 +347,7 @@ private class Actions(
                 nav.layer = Layer.SETTINGS
                 // On the update when there is one, else on the server in use.
                 val rows = settings()
-                nav.settingsIdx = rows.indexOfFirst { it.kind == SettingsKind.UPDATE || it.server == vm.server }.coerceAtLeast(0)
+                nav.settingsIdx = if (ru.homescreen.tv.Updater.available != null) 0 else rows.indexOfFirst { it.server == vm.server }.coerceAtLeast(0)
             }
         }
     }
@@ -618,7 +618,7 @@ private class Actions(
     }
 
     fun settings(): List<SettingsRow> =
-        settingsRows(ru.homescreen.tv.Updater.available != null, vm.sync.peers.isNotEmpty(), vm.hiddenApps.isNotEmpty())
+        settingsRows(vm.sync.peers.isNotEmpty(), vm.hiddenApps.isNotEmpty())
 
     /** The gear menu: see [settingsRows]. Linking keeps it open, so its line shows how the search goes. */
     private fun settingsKey(k: Key, ok: Boolean, back: Boolean): Boolean {
@@ -631,9 +631,13 @@ private class Actions(
             ok -> {
                 val r = rows[nav.settingsIdx]
                 when (r.kind) {
-                    SettingsKind.UPDATE -> {
+                    SettingsKind.UPDATE -> if (ru.homescreen.tv.Updater.available != null) {
                         nav.toast = "Скачиваю обновление…"
                         scope.launch { ru.homescreen.tv.Updater.install(ctx) }
+                    } else scope.launch {
+                        // Found: the line turns into «Обновить до X» under the focus, no toast needed.
+                        if (!ru.homescreen.tv.Updater.check()) nav.toast = "GitHub не отвечает, попробуйте позже"
+                        else if (ru.homescreen.tv.Updater.available == null) nav.toast = "Это последняя версия"
                     }
                     SettingsKind.SERVER -> {
                         nav.layer = Layer.NONE

@@ -35,14 +35,35 @@ object Updater {
         private set
     /** What went wrong with the last «Обновить», for a toast; cleared when read. */
     var problem by mutableStateOf<String?>(null)
+    /** Asking GitHub right now: the menu line says so. */
+    var checking by mutableStateOf(false)
+        private set
+    /** Wall-clock time of the last check GitHub answered; 0 until one did. */
+    private var checkedAt = 0L
 
-    suspend fun check() {
-        val j = Net.json(LATEST) ?: return
-        val version = j.optString("tag_name").removePrefix("v")
-        val assets = j.optJSONArray("assets") ?: return
-        val url = (0 until assets.length()).map { assets.getJSONObject(it) }
-            .firstOrNull { it.optString("name") == ASSET }?.optString("browser_download_url") ?: return
-        available = if (newer(version, BuildConfig.VERSION_NAME)) Release(version, url) else null
+    /**
+     * Whether a check is due on a return to Home. A timer alone is not enough: coroutine delays stop while the TV
+     * sleeps in standby, so «every 12 hours» could stretch over days, and a check right after boot fails before the
+     * network is up.
+     */
+    val due: Boolean get() = !checking && System.currentTimeMillis() - checkedAt > 6 * 3600_000L
+
+    /** Asks GitHub for the latest release; false when it could not be reached. */
+    suspend fun check(): Boolean {
+        if (checking) return false
+        checking = true
+        try {
+            val j = Net.json(LATEST) ?: return false
+            checkedAt = System.currentTimeMillis()
+            val version = j.optString("tag_name").removePrefix("v")
+            val assets = j.optJSONArray("assets") ?: return true
+            val url = (0 until assets.length()).map { assets.getJSONObject(it) }
+                .firstOrNull { it.optString("name") == ASSET }?.optString("browser_download_url")
+            available = if (url != null && newer(version, BuildConfig.VERSION_NAME)) Release(version, url) else null
+            return true
+        } finally {
+            checking = false
+        }
     }
 
     /** "1.10" > "1.9": compared number by number. */

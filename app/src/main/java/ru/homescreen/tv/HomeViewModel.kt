@@ -163,12 +163,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             refreshCatalog()
             prefetchFeatured()
         }
-        // A newer release on GitHub shows in the gear menu; it is installed only when asked.
+        // A newer release on GitHub shows in the gear menu; it is installed only when asked. A failed check (no network
+        // yet after boot) is repeated soon; returns to Home check too, see [Updater.due].
         viewModelScope.launch {
-            while (true) {
-                Updater.check()
-                delay(12 * 3600_000L)
-            }
+            while (true) delay(if (Updater.check()) 12 * 3600_000L else 10 * 60_000L)
         }
         viewModelScope.launch {
             var locatedAt = 0L
@@ -192,6 +190,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (!started) return
         viewModelScope.launch { refreshSystem() }
         if (refreshJob?.isActive != true) refreshCatalog()
+        if (Updater.due) viewModelScope.launch { Updater.check() }
         sync.resume()
     }
 
