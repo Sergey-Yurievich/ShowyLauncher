@@ -36,11 +36,11 @@
 
 | | |
 |---|---|
-| ![Подборка](docs/screenshots/rows.jpg)<br>Подборка, сверху фильм в фокусе | ![Жанры](docs/screenshots/genres.jpg)<br>Жанры на вкладках «Фильмы» и «Сериалы» |
-| ![Экран фильма](docs/screenshots/watch.jpg)<br>Экран фильма: источник, сезон, озвучка | ![Источники](docs/screenshots/sources.jpg)<br>Выбор источника |
-| ![Поиск](docs/screenshots/search.jpg)<br>Поиск | ![Настройки](docs/screenshots/settings.jpg)<br>Настройки |
-| ![Меню серии](docs/screenshots/menu.jpg)<br>Долгое нажатие на серии | ![Приложения](docs/screenshots/apps.jpg)<br>Перемещение приложения |
-| ![В ролях](docs/screenshots/cast.jpg)<br>Актёры под сериями | ![Фильмы актёра](docs/screenshots/person.jpg)<br>Фильмы актёра |
+| ![Подборка](docs/screenshots/rows.jpg) | ![Жанры](docs/screenshots/genres.jpg) |
+| ![Экран фильма](docs/screenshots/watch.jpg) | ![Источники](docs/screenshots/sources.jpg) |
+| ![Поиск](docs/screenshots/search.jpg) | ![Настройки](docs/screenshots/settings.jpg) |
+| ![Меню серии](docs/screenshots/menu.jpg) | ![Приложения](docs/screenshots/apps.jpg) |
+| ![В ролях](docs/screenshots/cast.jpg) | ![Фильмы актёра](docs/screenshots/person.jpg) |
 
 ## Как пользоваться
 
