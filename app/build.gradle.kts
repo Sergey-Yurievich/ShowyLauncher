@@ -21,8 +21,8 @@ android {
         minSdk = 28
         // Google TV 14 refuses sideloads with an old target; 34 also keeps Android 12 behaviour predictable.
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.8"
+        versionCode = 11
+        versionName = "1.9"
         buildConfigField("String", "TMDB_KEY", "\"$tmdbKey\"")
     }
 
@@ -59,5 +59,11 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
     implementation(libs.androidx.palette)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+    implementation(libs.media3.hls)
+    implementation(libs.media3.okhttp)
     testImplementation(libs.junit4)
+    // The real org.json: Android's is a stub in unit tests.
+    testImplementation(libs.json)
 }

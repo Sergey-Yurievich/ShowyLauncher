@@ -63,9 +63,11 @@
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- Also an app among the others: Google TV lists only LEANBACK_LAUNCHER ones. -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <!-- homescreen://back: the «Подборки» plugin in Lampa brings the launcher back after playback, leaving
                  Lampa warm in the background instead of closing it. -->
@@ -76,6 +78,13 @@
                 <data android:scheme="homescreen" />
             </intent-filter>
         </activity>
+
+        <!-- The built-in player: two subtitle languages at once from a file's own tracks; see PlayerActivity. -->
+        <activity
+            android:name=".PlayerActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape" />
 
         <!-- The assistant role: the remote's microphone button opens the launcher's voice search; see Assistant. -->
         <service

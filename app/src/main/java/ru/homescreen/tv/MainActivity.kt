@@ -11,6 +11,7 @@ import coil.Coil
 import coil.ImageLoader
 import coil.memory.MemoryCache
 import ru.homescreen.tv.data.Net
+import ru.homescreen.tv.data.PlayerPrefs
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.ui.HomeScreen
 
@@ -27,8 +28,10 @@ class MainActivity : ComponentActivity() {
     /** ViMu reports where playback stopped, voice input what was said: both come back as activity results. */
     private var onResult: ((Int, Intent?) -> Unit)? = null
     private val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-        onResult?.invoke(r.resultCode, r.data)
+        // Taken off first: the answer may start the next player, which brings its own.
+        val done = onResult
         onResult = null
+        done?.invoke(r.resultCode, r.data)
     }
 
     fun forResult(intent: Intent, done: (Int, Intent?) -> Unit): Boolean = try {
@@ -44,6 +47,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Net.init(this)
         Showy.init(this)
+        PlayerPrefs.init(this)
         Coil.setImageLoader(
             ImageLoader.Builder(this)
                 .okHttpClient(Net.client)

@@ -294,7 +294,8 @@ private class Actions(
             when (nav.zone) {
                 Zone.ROWS -> if (nav.tab != Tab.APPS) nav.zone = Zone.HERO else toTop()
                 Zone.TOP -> if (nav.tab != Tab.APPS) nav.zone = Zone.HERO else nav.zone = Zone.ROWS
-                Zone.HERO -> {}
+                // Opened as an app beside the TV's own home screen: Back from the top leaves, as in any app.
+                Zone.HERO -> if (!Apps.isHome(ctx)) (ctx as? android.app.Activity)?.moveTaskToBack(true)
             }
             return true
         }
@@ -646,6 +647,10 @@ private class Actions(
                             vm.selectServer(s)
                             nav.toast = "Источник фильмов: ${s.label}"
                         }
+                    }
+                    SettingsKind.SKIP -> {
+                        ru.homescreen.tv.data.PlayerPrefs.toggleSkip()
+                        nav.toast = if (ru.homescreen.tv.data.PlayerPrefs.skipIntros) "Заставки будут пропускаться сами" else "Заставки — по кнопке «Пропустить»"
                     }
                     SettingsKind.LINK -> vm.sync.pair()
                     SettingsKind.UNLINK -> {

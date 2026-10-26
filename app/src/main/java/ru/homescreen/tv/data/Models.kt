@@ -75,8 +75,8 @@ data class Details(
     }
 }
 
-/** One episode as TMDB describes it (`tv/{id}/season/{n}`). */
-data class Episode(val name: String, val runtime: Int, val vote: Double, val air: String)
+/** One episode as TMDB describes it (`tv/{id}/season/{n}`); [still] is a TMDB path, see [Tmdb.img]. */
+data class Episode(val name: String, val runtime: Int, val vote: Double, val air: String, val still: String? = null)
 
 /** An actor of «В ролях»; [photo] is a TMDB path, see [Tmdb.img]. */
 data class Person(val id: Int, val name: String, val photo: String?)

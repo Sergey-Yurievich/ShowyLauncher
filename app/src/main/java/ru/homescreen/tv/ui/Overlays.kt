@@ -11,6 +11,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
@@ -30,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +58,7 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import ru.homescreen.tv.data.Details
 import ru.homescreen.tv.data.Person
+import ru.homescreen.tv.data.PlayerPrefs
 import ru.homescreen.tv.data.Showy
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
@@ -100,7 +107,7 @@ fun InputsMenu(visible: Boolean, inputs: List<TvInput>, focus: Int) {
     }
 }
 
-enum class SettingsKind { UPDATE, SERVER, LINK, UNLINK, UNHIDE, ANDROID }
+enum class SettingsKind { UPDATE, SERVER, SKIP, LINK, UNLINK, UNHIDE, ANDROID }
 
 /** A line of the gear menu; the menu and the remote handling build the same list ([settingsRows]). */
 data class SettingsRow(val kind: SettingsKind, val server: Showy.Server? = null)
@@ -108,6 +115,7 @@ data class SettingsRow(val kind: SettingsKind, val server: Showy.Server? = null)
 fun settingsRows(linked: Boolean, hidden: Boolean): List<SettingsRow> = buildList {
     add(SettingsRow(SettingsKind.UPDATE))
     Showy.Server.entries.forEach { add(SettingsRow(SettingsKind.SERVER, it)) }
+    add(SettingsRow(SettingsKind.SKIP))
     add(SettingsRow(SettingsKind.LINK))
     if (linked) add(SettingsRow(SettingsKind.UNLINK))
     if (hidden) add(SettingsRow(SettingsKind.UNHIDE))
@@ -115,8 +123,8 @@ fun settingsRows(linked: Boolean, hidden: Boolean): List<SettingsRow> = buildLis
 }
 
 /**
- * The gear's dropdown: this version and a newer one when there is one (else a check on request), where films are looked for (the Showy server), the TVs sharing
- * this one's history, hidden apps to bring back, then Android's own settings.
+ * The gear's dropdown: this version and a newer one when there is one (else a check on request), where films are looked for (the Showy server), the built-in
+ * player's intro skipping, the TVs sharing this one's history, hidden apps to bring back, then Android's own settings.
  */
 @Composable
 fun SettingsMenu(
@@ -126,11 +134,13 @@ fun SettingsMenu(
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
         val shape = RoundedCornerShape(30.u)
         Box(Modifier.fillMaxSize()) {
+            // Linked TVs and hidden apps make it taller than the screen: it scrolls after the focus (see [MenuRow]).
             Column(
-                Modifier.offset(x = 1304.u, y = 140.u).width(520.u)
+                Modifier.offset(x = 1304.u, y = 140.u).width(520.u).heightIn(max = 900.u)
                     .shadow(40.u, shape)
                     .clip(shape)
                     .background(Color(0xF5181A1F))
+                    .verticalScroll(rememberScrollState())
                     .padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
             ) {
@@ -153,6 +163,11 @@ fun SettingsMenu(
                             }
                             val s = r.server ?: return@forEachIndexed
                             MenuRow(s.label, s.host.substringAfter("//"), null, f, s == current)
+                        }
+                        SettingsKind.SKIP -> {
+                            MenuDivider()
+                            MenuHeader("Плеер")
+                            MenuRow("Пропускать заставки сами", "С кнопкой «Вернуться»", Icons.SkipAhead, f, PlayerPrefs.skipIntros)
                         }
                         SettingsKind.LINK -> {
                             MenuDivider()
@@ -209,8 +224,10 @@ private fun MenuDivider() {
 private fun MenuRow(label: String, sub: String?, icon: ImageVector?, focused: Boolean, checked: Boolean) {
     val fg = if (focused) Colors.FocusFg else Colors.Fg
     val sc by animateFloatAsState(if (focused) 1.03f else 1f, label = "mr")
+    val view = remember { BringIntoViewRequester() }
+    LaunchedEffect(focused) { if (focused) view.bringIntoView() }
     Row(
-        Modifier.fillMaxWidth().graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(20.u))
+        Modifier.fillMaxWidth().bringIntoViewRequester(view).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(20.u))
             .background(if (focused) Color.White else Color.Transparent)
             .padding(horizontal = 20.u, vertical = 16.u),
         verticalAlignment = Alignment.CenterVertically,

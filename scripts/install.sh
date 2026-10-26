@@ -100,4 +100,4 @@ if [ "$home_now" != "$PKG/.MainActivity" ] && [ -n "$disabled_homes" ]; then
   die "лаунчер не стал главным экраном ($home_now); стандартный экран Google TV включён обратно. Перезагрузите ТВ и запустите скрипт снова."
 fi
 [ "$(sh_out getprop ro.adb.secure)" = 0 ] && echo "Внимание: этот ТВ пускает отладку без подтверждения — после установки обязательно выключите её (шаг 3)."
-installed net.gtvbox.vimuhd || echo "Внимание: нет плеера ViMu. Установите «ViMu Media Player for TV» из Play Маркета — фильмы играют в нём."
+installed net.gtvbox.vimuhd || echo "Плеера ViMu нет: фильмы играют во встроенном плеере, а редкие файлы (образы Blu-ray) не откроются. По желанию — «ViMu Media Player for TV» из Play Маркета."

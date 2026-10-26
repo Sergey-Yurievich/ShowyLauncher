@@ -16,6 +16,7 @@ import ru.homescreen.tv.data.History
 import ru.homescreen.tv.data.Media
 import ru.homescreen.tv.data.Person
 import ru.homescreen.tv.data.Showy
+import ru.homescreen.tv.data.Subs
 import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
 import ru.homescreen.tv.data.Vimu
@@ -93,6 +94,8 @@ class WatchSession(
     val episodes = mutableStateMapOf<Int, Map<Int, Episode>>()
     /** Quality of `call` files, known only after asking the server; by file URL. */
     val qualities = mutableStateMapOf<String, String>()
+    /** The subtitle tracks a probe saw: Alloha leaves them out of some answers, the one for OK included. */
+    private val probedSubs = HashMap<String, List<Subs.Track>>()
     private val seasonsAsked = HashSet<Int>()
     private var probeJob: Job? = null
 
@@ -372,20 +375,24 @@ class WatchSession(
         return qualities[item.url] ?: ""
     }
 
-    /** For `call` files the quality comes with the stream link: asked once the focus rests on the row. */
+    /** For `call` files the quality and subtitles come with the stream link: asked once the focus rests on the row. */
     fun probe(item: Showy.Item) {
-        if (item.method != "call" || quality(item).isNotEmpty() || busy) return
+        if (item.method != "call" || (quality(item).isNotEmpty() && item.url in probedSubs) || busy) return
         probeJob?.cancel()
         probeJob = scope.launch {
             delay(450)
             val s = runCatching { Showy.stream(item) }.getOrNull() ?: return@launch
             if (s.quality.isNotEmpty()) qualities[item.url] = s.quality
+            probedSubs[item.url] = s.subtitles
         }
     }
 
     // ---------- Playing ----------
 
-    /** Plays [i] in ViMu; a series continues with the following episodes as a ViMu playlist. */
+    /**
+     * Plays [i] in the built-in player ([PlayerActivity]); a series goes on there from episode to episode (see
+     * [playOwn]). A file Media3 cannot read at all goes to ViMu.
+     */
     fun play(i: Int, launch: (Intent, (Int, Intent?) -> Unit) -> Boolean) {
         val f = files.getOrNull(i) ?: return
         if (busy) return
@@ -393,31 +400,100 @@ class WatchSession(
         pageJob = scope.launch {
             busy = true
             note = ""
-            val first = try { Showy.stream(f) } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
+            val got = try { Showy.stream(f) } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; null }
             busy = false
-            if (first == null) { note = "Нет ссылки на видео. Попробуйте другой источник."; return@launch }
-            val items = arrayListOf(f)
-            val urls = arrayListOf(first.url)
-            if (serial) for (next in files.drop(i + 1).take(30)) {
-                val u = Showy.direct(next) ?: break
-                items += next
-                urls += u
-            }
-            val names = items.map { label(it) }
-            val mark = mark(f)
-            val start = if (mark != null && !mark.done && mark.positionMs > 10_000) mark.positionMs - 5_000 else 0L
-            // A series keeps the voice it played in even when it was the page's default, for the new-episode check.
-            val played = if (serial) choice.copy(voice = voices.getOrNull(voice)?.text ?: choice.voice) else choice.copy(voice = f.text)
-            history.saveChoice(title.key, played.copy(source = source?.key ?: ""))
-            // Written before ViMu starts: if the launcher is killed during playback, the title is still in «Продолжить».
-            val before = history.entry(title.key)
-            history.played(title, f.season, f.episode, label(f), mark?.positionMs ?: 0, mark?.durationMs ?: 0, false)
-            onPlayed()
-            val ok = launch(Vimu.intent(urls, names, start, first.headers)) { code, data ->
-                result(items, urls, Vimu.result(code, data), before)
-            }
-            if (!ok) note = "ViMu не установлен"
+            if (got == null) { note = "Нет ссылки на видео. Попробуйте другой источник."; return@launch }
+            playOwn(i, got.withSubtitles(f), launch)
         }
+    }
+
+    /** Alloha leaves the subtitles out of some answers: the ones a probe saw stand in. */
+    private fun Showy.Stream.withSubtitles(f: Showy.Item) = if (subtitles.isEmpty()) copy(subtitles = probedSubs[f.url] ?: emptyList()) else this
+
+    /** Where a file starts: a few seconds before where it was left, unless it was finished. */
+    private fun startOf(f: Showy.Item): Long {
+        val m = mark(f)
+        return if (m != null && !m.done && m.positionMs > 10_000) m.positionMs - 5_000 else 0L
+    }
+
+    /**
+     * Remembers the source and voice and writes the file into «Продолжить» before a player starts: if the launcher is
+     * killed during playback, the title is still there. Returns the entry as it was, for when the file did not open.
+     */
+    private fun beforePlaying(f: Showy.Item): org.json.JSONObject? {
+        // A series keeps the voice it played in even when it was the page's default, for the new-episode check.
+        val played = if (serial) choice.copy(voice = voices.getOrNull(voice)?.text ?: choice.voice) else choice.copy(voice = f.text)
+        history.saveChoice(title.key, played.copy(source = source?.key ?: ""))
+        val before = history.entry(title.key)
+        val m = mark(f)
+        history.played(title, f.season, f.episode, label(f), m?.positionMs ?: 0, m?.durationMs ?: 0, false)
+        onPlayed()
+        return before
+    }
+
+    /**
+     * The built-in player: a series' episodes are switched inside it, each link asked for when the episode starts,
+     * each position written here as it goes.
+     */
+    private fun playOwn(i: Int, first: Showy.Stream, launch: (Intent, (Int, Intent?) -> Unit) -> Boolean) {
+        val list = if (serial) files else listOf(files[i])
+        val at = if (serial) i else 0
+        var before: org.json.JSONObject? = null
+        var last = first
+        val items = list.map { f ->
+            val ep = episode(f)
+            Playback.Item(
+                season = seasonOf(f), episode = f.episode,
+                name = ep?.name?.trim()?.takeIf { !Tmdb.genericEpisode(it) },
+                still = Tmdb.img(ep?.still, "w300"), runtimeMin = ep?.runtime ?: 0,
+            )
+        }
+        Playback.current = Playback(
+            key = title.key, title = title.name, tmdbId = title.id, serial = serial, items = items, start = at,
+            open = open@{ k ->
+                val f = list[k]
+                val s = if (k == at && last === first) first else runCatching { Showy.stream(f) }.getOrNull()?.withSubtitles(f) ?: return@open null
+                last = s
+                val start = startOf(f)
+                before = beforePlaying(f)
+                Playback.Opened(s.url, s.headers, start, s.subtitles)
+            },
+            report = { k, pos, dur, ended ->
+                val f = list[k]
+                history.played(title, f.season, f.episode, label(f), pos, dur, ended)
+                marks++
+                onPlayed()
+            },
+            progress = { k ->
+                val m = mark(list[k])
+                when {
+                    m == null -> 0f
+                    m.done -> 1f
+                    m.durationMs > 0 -> m.positionMs.toFloat() / m.durationMs
+                    else -> 0f
+                }
+            },
+        )
+        val ok = launch(PlayerActivity.intent()) { code, data ->
+            Playback.current = null
+            val k = data?.getIntExtra("item", at) ?: at
+            // Media3 has no reader for some containers ViMu opens (Blu-ray's M2TS, say): the file goes there, with one subtitle track.
+            if (code == 4 && data?.getBooleanExtra("opened", true) == false) {
+                history.restore(title.key, before)
+                note = "Встроенный плеер не открыл файл, играет ViMu"
+                val f = list[k]
+                val urls = arrayListOf(last.url)
+                val start = startOf(f)
+                val b = beforePlaying(f)
+                if (!launch(Vimu.intent(urls, listOf(label(f)), start, last.headers)) { c, d -> note = ""; result(listOf(f), urls, Vimu.result(c, d), b) }) note = "ViMu не установлен"
+                return@launch
+            }
+            if (code == 4) note = "Видео не открылось. Попробуйте другой источник или озвучку."
+            marks++
+            idx = startIndex()
+            onPlayed()
+        }
+        if (!ok) { Playback.current = null; note = "Плеер не запустился" }
     }
 
     /**
@@ -438,12 +514,12 @@ class WatchSession(
     }
 
     private fun label(f: Showy.Item): String =
-        if (serial) listOfNotNull(seasons.getOrNull(season)?.text ?: f.season.takeIf { it > 0 }?.let { "$it сезон" }, f.text).joinToString(" · ")
+        if (serial) listOfNotNull(seasons.getOrNull(season)?.text ?: f.season.takeIf { it > 0 }?.let { "$it сезон" }, episodeName(f.text, f.episode)).joinToString(" · ")
         else title.name
 
     private fun result(items: List<Showy.Item>, urls: List<String>, r: Vimu.Result, before: org.json.JSONObject?) {
         android.util.Log.i("homescreen", "vimu: ended=${r.ended} failed=${r.failed} pos=${r.positionMs} dur=${r.durationMs} item=${r.url?.let(urls::indexOf)}")
-        if (r.failed) note = "ViMu не смог открыть видео. Попробуйте другой источник или озвучку."
+        if (r.failed) note = "Видео не открылось. Попробуйте другой источник или озвучку."
         val at = r.url?.let { u -> urls.indexOf(u).takeIf { it >= 0 } } ?: if (r.ended) items.lastIndex else 0
         for (k in 0 until at) {
             val f = items[k]
@@ -460,5 +536,11 @@ class WatchSession(
 
     companion object {
         const val DEFAULT_SOURCE = "fxapi"
+
+        /** A torrent's file name ("Slow.Horses.S01E05.HDR.Master5.mkv") reads as «5 серия» in «Продолжить». */
+        fun episodeName(text: String, episode: Int): String =
+            if (episode > 0 && FILE_NAME.containsMatchIn(text)) "$episode серия" else text
+
+        private val FILE_NAME = Regex("\\.(mkv|mp4|avi|m2ts|ts|mov|webm|m4v)$|\\bS\\d{1,2}E\\d{1,3}\\b", RegexOption.IGNORE_CASE)
     }
 }

@@ -339,15 +339,22 @@ object Showy {
     private val RESOLUTION = Regex("\\d{3,4}p", RegexOption.IGNORE_CASE)
     private val EPISODE = Regex("^(\\d+)\\s*(серия|эпизод)", RegexOption.IGNORE_CASE)
 
-    data class Stream(val url: String, val quality: String, val headers: Map<String, String>)
+    data class Stream(val url: String, val quality: String, val headers: Map<String, String>, val subtitles: List<Subs.Track>)
 
-    /** The playable URL of a file, in its best quality. `call` files ask the server first. */
+    /**
+     * The playable URL of a file, in its best quality, with its subtitle tracks. `call` files ask the server first;
+     * a few sources hand the subtitles out by a link of their own (`subtitles_call`).
+     */
     suspend fun stream(item: Item): Stream? {
         val j = if (item.method == "play") item.json else {
             val t = getHandlingRch(item.url) ?: return null
             runCatching { JSONObject(t.trim()) }.getOrNull()?.also { deny(it) } ?: return null
         }
-        return fromJson(j)
+        val s = fromJson(j) ?: return null
+        val call = j.optString("subtitles_call").takeIf { it.isNotEmpty() && it != "null" }
+        if (s.subtitles.isNotEmpty() || call == null) return s
+        val list = get(account(abs(call)))?.let { t -> runCatching { Subs.tracks(JSONArray(t.trim())) }.getOrNull() }
+        return if (list.isNullOrEmpty()) s else s.copy(subtitles = list)
     }
 
     /**
@@ -368,7 +375,7 @@ object Showy {
         if (url.isEmpty()) return null
         val headers = HashMap<String, String>()
         j.optJSONObject("headers")?.let { h -> h.keys().forEach { k -> headers[k] = h.optString(k) } }
-        return Stream(playback(url), best?.key ?: "", headers)
+        return Stream(playback(url), best?.key ?: "", headers, Subs.tracks(j))
     }
 
     private fun first(url: String) = url.substringBefore(" or ").trim()

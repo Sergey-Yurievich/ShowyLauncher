@@ -216,7 +216,8 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         val own = entries.map { e ->
             val left = if (e.mark.durationMs > e.mark.positionMs) ((e.mark.durationMs - e.mark.positionMs) / 60_000).toInt() else 0
             val label = when {
-                e.title.media == Media.TV -> e.label
+                // Saved before file names were tidied: the last part is tidied here too.
+                e.title.media == Media.TV -> e.label.split(" · ").let { p -> (p.dropLast(1) + WatchSession.episodeName(p.last(), e.episode)).joinToString(" · ") }
                 left >= 60 -> "осталось ${left / 60} ч ${left % 60} мин"
                 left > 0 -> "осталось $left мин"
                 else -> ""

@@ -179,6 +179,7 @@ object Tmdb {
                 runtime = e.optInt("runtime"),
                 vote = e.optDouble("vote_average", 0.0).let { if (it.isNaN()) 0.0 else it },
                 air = e.optString("air_date"),
+                still = e.optString("still_path").takeIf { it.isNotEmpty() && it != "null" },
             )
         }
         return out

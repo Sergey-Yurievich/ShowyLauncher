@@ -59,6 +59,11 @@ object Apps {
             .thenBy { it.label.lowercase(Locale.ROOT) })
     }
 
+    /** Whether this launcher is the TV's home screen, or only an app opened from the TV's own one. */
+    fun isHome(context: Context): Boolean = context.packageManager
+        .resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)
+        ?.activityInfo?.packageName == context.packageName
+
     fun installed(context: Context, pkg: String): Boolean = try {
         context.packageManager.getPackageInfo(pkg, 0)
         true
