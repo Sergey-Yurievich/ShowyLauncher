@@ -183,6 +183,12 @@ private fun Clock(c: PlayerControls, modifier: Modifier) {
 
 private fun hhmm(t: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(t))
 
+/** "32 Мбит/с"; below 10, with a decimal: "4,5 Мбит/с". */
+private fun mbits(bps: Long): String {
+    val m = bps / 1_000_000.0
+    return if (m < 10) String.format(Locale("ru"), "%.1f Мбит/с", m) else "${m.toInt()} Мбит/с"
+}
+
 private fun time(ms: Long): String {
     val s = (ms / 1000).coerceAtLeast(0)
     return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
@@ -266,7 +272,11 @@ private fun Bar(c: PlayerControls, focused: Boolean) {
             Row(Modifier.fillMaxWidth()) {
                 BasicText(time(shown), style = text(28, 500))
                 Spacer(Modifier.weight(1f))
-                BasicText("−" + time(d - shown), style = text(28, 400, Colors.Muted))
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.u)) {
+                    BasicText("−" + time(d - shown), style = text(28, 400, Colors.Muted))
+                    c.loaded?.let { BasicText("Загружено ${(it * 100).toInt()}%", style = text(22, 400, Colors.Muted)) }
+                    if (c.loaded != null && c.speed > 0) BasicText(mbits(c.speed), style = text(22, 400, Colors.Muted))
+                }
             }
         }
         if (target != null) Bubble(c, target, d)
@@ -347,14 +357,21 @@ private fun Choice(title: String, sub: String?, focused: Boolean, checked: Boole
     }
 }
 
+/** [AUDIO_ROWS] voices at a time around the focus: a remux can carry a dozen. */
 @Composable
 private fun AudioMenu(c: PlayerControls) {
     MenuShade()
     MenuCard(600) {
         MenuTitle("Звук")
-        c.audio.forEachIndexed { i, t -> Choice(t.title, t.sub.ifEmpty { null }, i == c.audioIdx, i == c.audioSelected) }
+        val first = (c.audioIdx - AUDIO_ROWS / 2).coerceIn(0, (c.audio.size - AUDIO_ROWS).coerceAtLeast(0))
+        for (i in first until (first + AUDIO_ROWS).coerceAtMost(c.audio.size)) {
+            val t = c.audio[i]
+            Choice(t.title, t.sub.ifEmpty { null }, i == c.audioIdx, i == c.audioSelected)
+        }
     }
 }
+
+private const val AUDIO_ROWS = 7
 
 /** Two columns of the same tracks, the upper line's and the lower one's; six rows at a time around the focus. */
 @Composable

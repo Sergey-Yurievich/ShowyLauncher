@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.net.Uri
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
@@ -56,6 +58,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.homescreen.tv.data.Net
 import ru.homescreen.tv.data.PlayerPrefs
+import ru.homescreen.tv.data.Prefetch
 import ru.homescreen.tv.data.Segments
 import ru.homescreen.tv.data.Subs
 import ru.homescreen.tv.ui.LocalScale
@@ -78,6 +81,8 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     private lateinit var controls: PlayerControls
     private lateinit var playback: Playback
     private var current: Playback.Opened? = null
+    /** The file being downloaded to disk ahead of the player; null for HLS and servers without ranges. */
+    @Volatile private var prefetch: Prefetch? = null
     private var loadJob: Job? = null
     /** Some file got as far as playing: an error after that is not Media3 failing to read it. */
     private var opened = false
@@ -94,6 +99,8 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
         PlayerPrefs.init(this)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         controls = PlayerControls(this, playback)
+        // Files left by a player the system killed.
+        File(cacheDir, "video").deleteRecursively()
 
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildTextRenderers(
@@ -113,7 +120,12 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
         }
         // HLS with several qualities starts at the top: the TV is on a home network, not a phone's.
         val meter = DefaultBandwidthMeter.Builder(this).setInitialBitrateEstimate(30_000_000).build()
-        player = ExoPlayer.Builder(this, renderers).setTrackSelector(selector).setBandwidthMeter(meter).build()
+        // The buffer lives in the Java heap: Media3's default (up to ~145 MB for video and sound) ran the launcher out of
+        // memory on the Android 12 TV (192 MB per app) a few minutes into a 4K file.
+        // After a stall it waits for a longer run than Media3's 5 s, so a slow torrent stops less often.
+        val buffer = DefaultLoadControl.Builder().setTargetBufferBytes(BUFFER_BYTES)
+            .setBufferDurationsMs(50_000, 50_000, 5_000, 15_000).build()
+        player = ExoPlayer.Builder(this, renderers).setTrackSelector(selector).setBandwidthMeter(meter).setLoadControl(buffer).build()
         player.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 controls.loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
@@ -204,18 +216,26 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
             controls.startItem(i)
             // The last file's track means nothing in this one: [keepVoice] picks the voice again once the tracks are known.
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
-            val (hls, subs) = coroutineScope {
+            val old = prefetch
+            val (hls, subs, disk) = coroutineScope {
                 val h = async { isHls(o.url, o.headers) }
                 val t = async { sideload(o.subtitles) }
-                h.await() to t.await()
+                // Asked alongside: a torrent's first answer can take seconds.
+                val d = async(Dispatchers.IO) { if (h.await()) null else Prefetch.open(File(cacheDir, "video/${SystemClock.uptimeMillis()}"), o.url, o.headers) }
+                Triple(h.await(), t.await(), d.await())
             }
+            prefetch = disk
             val item = MediaItem.Builder().setUri(o.url).setSubtitleConfigurations(subs)
                 .apply { if (hls) setMimeType(MimeTypes.APPLICATION_M3U8) }.build()
             // The sideloaded subtitles are files in the cache: plain file:// next to the stream's http(s).
-            val data = DefaultDataSource.Factory(this@PlayerActivity, OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(o.headers))
+            val net = if (disk != null) DataSource.Factory { Prefetch.Source(disk) }
+                else OkHttpDataSource.Factory(Net.client).setDefaultRequestProperties(o.headers)
+            val data = DefaultDataSource.Factory(this@PlayerActivity, net)
             player.setMediaSource(DefaultMediaSourceFactory(data).createMediaSource(item), o.startMs)
             player.prepare()
             player.playWhenReady = true
+            // The last episode's file goes once the player has let go of it.
+            old?.let { try { delay(5_000) } finally { it.close() } }
         }
     }
 
@@ -290,6 +310,8 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     override val position: Long get() = player.currentPosition
     override val duration: Long get() = player.duration.takeIf { it > 0 } ?: 0L
     override val buffered: Long get() = player.bufferedPosition
+    override val loaded: Float? get() = prefetch?.loaded
+    override val speed: Long get() = prefetch?.speed ?: 0L
     override val playing: Boolean get() = player.playWhenReady
 
     override fun seekTo(ms: Long) = player.seekTo(ms)
@@ -364,6 +386,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     override fun onDestroy() {
         super.onDestroy()
         if (::player.isInitialized) player.release()
+        prefetch?.close()
     }
 
     private fun answer(code: Int) {
@@ -495,6 +518,8 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     }
 
     companion object {
+        /** About 10 s of an 80 Mbit/s 4K remux, half a minute and more of anything lighter. */
+        private const val BUFFER_BYTES = 96 shl 20
         private val HANDLED = setOf(
             KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,

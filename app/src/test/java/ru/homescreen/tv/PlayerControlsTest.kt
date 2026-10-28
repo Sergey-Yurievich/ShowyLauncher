@@ -12,6 +12,8 @@ class PlayerControlsTest {
         override var position = 600_000L
         override var duration = 2_400_000L
         override val buffered get() = position
+        override val loaded: Float? = null
+        override val speed = 0L
         var on = true
         override val playing get() = on
         val seeks = ArrayList<Long>()
