@@ -10,7 +10,7 @@ import java.io.File
  * added, each one taken out with the time it was removed, so [Sync] can merge the lists of linked TVs (later wins).
  */
 class Bookmarks(context: Context) {
-    private val file = File(context.filesDir, "bookmarks.json")
+    private val file = AtomicJsonFile(File(context.filesDir, "bookmarks.json"))
     private val added = HashMap<String, Pair<Title, Long>>()
     private val removed = HashMap<String, Long>()
 
@@ -18,17 +18,13 @@ class Bookmarks(context: Context) {
     var onChange: (() -> Unit)? = null
 
     init {
-        try {
-            if (file.exists()) {
-                val text = file.readText()
-                if (text.trimStart().startsWith("[")) {
-                    // Before 1.6: a plain array, newest first. Its order is kept by spacing the times a second apart.
-                    val a = JSONArray(text)
-                    val now = System.currentTimeMillis()
-                    for (i in 0 until a.length()) Store.titleFromJson(a.getJSONObject(i)).let { added[it.key] = it to now - i * 1000L }
-                } else read(JSONObject(text))
-            }
-        } catch (_: Exception) {
+        file.read { text ->
+            if (text.trimStart().startsWith("[")) {
+                // Before 1.6: a plain array, newest first. Its order is kept by spacing the times a second apart.
+                val a = JSONArray(text)
+                val now = System.currentTimeMillis()
+                for (i in 0 until a.length()) Store.titleFromJson(a.getJSONObject(i)).let { added[it.key] = it to now - i * 1000L }
+            } else read(JSONObject(text))
         }
     }
 
@@ -80,12 +76,5 @@ class Bookmarks(context: Context) {
         added.keys.filter { (removed[it] ?: -1) >= added.getValue(it).second }.forEach { added.remove(it) }
     }
 
-    private fun write() {
-        try {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(export().toString())
-            tmp.renameTo(file)
-        } catch (_: Exception) {
-        }
-    }
+    private fun write() = file.write(export().toString())
 }

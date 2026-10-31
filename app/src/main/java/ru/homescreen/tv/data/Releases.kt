@@ -11,12 +11,8 @@ import java.io.File
  * anything else does not count. A "yes" holds until the stamp changes, a "no" for [TTL_NO].
  */
 class Releases(context: Context) {
-    private val file = File(context.filesDir, "releases.json")
-    private val map: JSONObject = try {
-        if (file.exists()) JSONObject(file.readText()) else JSONObject()
-    } catch (e: Exception) {
-        JSONObject()
-    }
+    private val file = AtomicJsonFile(File(context.filesDir, "releases.json"))
+    private val map: JSONObject = file.readObject()
 
     /** The last answer for this stamp, and whether it is still fresh; null if never asked. */
     @Synchronized
@@ -42,14 +38,7 @@ class Releases(context: Context) {
         write()
     }
 
-    private fun write() {
-        try {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(map.toString())
-            tmp.renameTo(file)
-        } catch (_: Exception) {
-        }
-    }
+    private fun write() = file.write(map.toString())
 
     private companion object {
         const val TTL_NO = 3 * 3600_000L

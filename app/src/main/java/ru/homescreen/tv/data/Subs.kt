@@ -1,7 +1,5 @@
 package ru.homescreen.tv.data
 
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -43,13 +41,19 @@ object Subs {
     // ---------- Files ----------
 
     /** A track's text in UTF-8, whatever it came in; null when it did not load. */
-    suspend fun fetch(url: String): String? = withContext(Dispatchers.IO) {
+    suspend fun fetch(url: String): String? {
         val abs = if (url.startsWith("/")) Showy.host + url else url
-        runCatching {
-            Net.client.newCall(Request.Builder().url(abs).build()).execute().use { r ->
+        val text = try {
+            Net.client.newCall(Request.Builder().url(abs).build()).await { r ->
                 if (!r.isSuccessful) null else r.body?.bytes()?.let(::decode)
             }
-        }.getOrNull().also { if (it == null) android.util.Log.w("homescreen", "subs: no file at ${abs.substringBefore('?')}") }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        if (text == null) android.util.Log.w("homescreen", "subs: no file at ${abs.substringBefore('?')}")
+        return text
     }
 
     /** UTF-8, else Windows-1251: older Russian subtitles still come in it. */

@@ -44,6 +44,8 @@ android {
         compose = true
         buildConfig = true
     }
+    // android.util.Log in code under test answers 0 instead of throwing.
+    testOptions.unitTests.isReturnDefaultValues = true
 }
 
 dependencies {

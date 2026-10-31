@@ -1,18 +1,24 @@
 package ru.homescreen.tv.data
 
 import android.content.Context
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Cache
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 object Net {
     lateinit var client: OkHttpClient
@@ -29,26 +35,45 @@ object Net {
     }
 
     /** GET and parse a JSON object; null on any network or parse error. Some APIs want the client named ([userAgent]). */
-    suspend fun json(url: String, userAgent: String? = null): JSONObject? = withContext(Dispatchers.IO) {
-        try {
-            val b = Request.Builder().url(url)
-            userAgent?.let { b.header("User-Agent", it) }
-            client.newCall(b.build()).execute().use { r ->
-                if (!r.isSuccessful) null else r.body?.string()?.let { JSONObject(it) }
-            }
-        } catch (e: Exception) {
-            null
-        }
+    suspend fun json(url: String, userAgent: String? = null): JSONObject? = try {
+        val b = Request.Builder().url(url)
+        userAgent?.let { b.header("User-Agent", it) }
+        client.newCall(b.build()).await { r -> if (!r.isSuccessful) null else r.body?.string()?.let { JSONObject(it) } }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
     }
 
     /** True when the URL answers 2xx within the client's timeouts. */
-    suspend fun reachable(url: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            client.newCall(Request.Builder().url(url).head().build()).execute().use { it.isSuccessful }
-        } catch (e: Exception) {
-            false
-        }
+    suspend fun reachable(url: String): Boolean = try {
+        client.newCall(Request.Builder().url(url).head().build()).await { it.isSuccessful }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
     }
+}
+
+/**
+ * Runs the call on OkHttp's threads and hands [read] the response there, closing it after. A cancelled coroutine
+ * cancels the call: a screen left mid-request does not hold a connection for the whole timeout.
+ */
+suspend fun <T> Call.await(read: (Response) -> T): T = suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+
+        override fun onResponse(call: Call, response: Response) {
+            val result = try {
+                response.use(read)
+            } catch (e: Exception) {
+                cont.resumeWithException(e)
+                return
+            }
+            cont.resume(result)
+        }
+    })
 }
 
 /**

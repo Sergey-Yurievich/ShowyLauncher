@@ -12,15 +12,15 @@ import java.io.File
  * refreshes it. Same policy as the plugin: rows live 6 hours and are refetched in the background after 30 minutes.
  */
 class Store(context: Context) {
-    private val rowsFile = File(context.filesDir, "rows.json")
-    private val detailsFile = File(context.filesDir, "details.json")
+    private val rowsFile = AtomicJsonFile(File(context.filesDir, "rows.json"))
+    private val detailsFile = AtomicJsonFile(File(context.filesDir, "details.json"))
 
     private var rows: JSONObject = JSONObject()
     private val details = LinkedHashMap<String, Pair<Long, Details>>(64, 0.75f, true)
 
     suspend fun open() = withContext(Dispatchers.IO) {
-        val r = read(rowsFile)
-        val d = read(detailsFile)
+        val r = rowsFile.readObject()
+        val d = detailsFile.readObject()
         val now = System.currentTimeMillis()
         synchronized(this@Store) {
             rows = r
@@ -68,23 +68,8 @@ class Store(context: Context) {
             for ((k, v) in details) d.put(k, JSONObject().put("t", v.first).put("d", detailsToJson(v.second)))
             snapshotDetails = d.toString()
         }
-        write(rowsFile, snapshotRows)
-        write(detailsFile, snapshotDetails)
-    }
-
-    private fun read(f: File): JSONObject = try {
-        if (f.exists()) JSONObject(f.readText()) else JSONObject()
-    } catch (e: Exception) {
-        JSONObject()
-    }
-
-    private fun write(f: File, text: String) {
-        try {
-            val tmp = File(f.parentFile, f.name + ".tmp")
-            tmp.writeText(text)
-            tmp.renameTo(f)
-        } catch (_: Exception) {
-        }
+        rowsFile.writeNow(snapshotRows)
+        detailsFile.writeNow(snapshotDetails)
     }
 
     companion object {

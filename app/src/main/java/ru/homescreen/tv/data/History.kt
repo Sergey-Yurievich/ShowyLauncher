@@ -12,12 +12,8 @@ import java.io.File
  * `removed`: TVs linked by [Sync] merge their histories record by record, the later one wins.
  */
 class History(context: Context) {
-    private val file = File(context.filesDir, "history.json")
-    private var root: JSONObject = try {
-        if (file.exists()) JSONObject(file.readText()) else JSONObject()
-    } catch (e: Exception) {
-        JSONObject()
-    }
+    private val file = AtomicJsonFile(File(context.filesDir, "history.json"))
+    private var root: JSONObject = file.readObject()
 
     /** Called after every change made here (not after a merge): linked TVs are told. */
     var onChange: (() -> Unit)? = null
@@ -148,14 +144,7 @@ class History(context: Context) {
         onChange?.invoke()
     }
 
-    private fun write() {
-        try {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(root.toString())
-            tmp.renameTo(file)
-        } catch (_: Exception) {
-        }
-    }
+    private fun write() = file.write(root.toString())
 
     private companion object {
         val SECTIONS = listOf("marks", "titles", "choice", "removed")

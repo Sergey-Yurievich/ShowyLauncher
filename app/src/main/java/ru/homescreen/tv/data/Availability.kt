@@ -10,12 +10,8 @@ import java.io.File
  * one day (new releases reach the sources later).
  */
 class Availability(context: Context) {
-    private val file = File(context.filesDir, "playable2.json")
-    private val map: JSONObject = try {
-        if (file.exists()) JSONObject(file.readText()) else JSONObject()
-    } catch (e: Exception) {
-        JSONObject()
-    }
+    private val file = AtomicJsonFile(File(context.filesDir, "playable2.json"))
+    private val map: JSONObject = file.readObject()
 
     @Synchronized
     fun get(key: String): Boolean? {
@@ -31,12 +27,7 @@ class Availability(context: Context) {
             val oldest = map.keys().asSequence().toList().sortedBy { map.optJSONArray(it)?.optLong(1) ?: 0 }
             oldest.take(map.length() - 2000).forEach { map.remove(it) }
         }
-        try {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(map.toString())
-            tmp.renameTo(file)
-        } catch (_: Exception) {
-        }
+        file.write(map.toString())
     }
 
     /** Answers from another Showy server do not hold for this one. */

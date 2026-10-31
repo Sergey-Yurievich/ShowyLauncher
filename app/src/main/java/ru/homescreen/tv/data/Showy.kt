@@ -3,9 +3,7 @@ package ru.homescreen.tv.data
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import okhttp3.CacheControl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -415,25 +413,28 @@ object Showy {
 
     private fun randomId(n: Int) = (1..n).map { "abcdefghijklmnopqrstuvwxyz0123456789".random() }.joinToString("")
 
-    internal suspend fun get(url: String, timeoutSec: Long = 15): String? = withContext(Dispatchers.IO) {
-        try {
-            val c = Net.client.newBuilder().readTimeout(timeoutSec, java.util.concurrent.TimeUnit.SECONDS).build()
-            c.newCall(Request.Builder().url(url).header("User-Agent", UA).cacheControl(CacheControl.FORCE_NETWORK).build())
-                .execute().use { r -> r.body?.string() }
-        } catch (e: Exception) {
-            android.util.Log.w("homescreen", "showy get: $e")
-            null
-        }
+    /** Net's client with a longer read timeout, one per timeout: they share its pool and cache. */
+    private val clients = java.util.concurrent.ConcurrentHashMap<Long, okhttp3.OkHttpClient>()
+
+    internal suspend fun get(url: String, timeoutSec: Long = 15): String? = try {
+        val c = clients.getOrPut(timeoutSec) { Net.client.newBuilder().readTimeout(timeoutSec, java.util.concurrent.TimeUnit.SECONDS).build() }
+        c.newCall(Request.Builder().url(url).header("User-Agent", UA).cacheControl(CacheControl.FORCE_NETWORK).build())
+            .await { r -> r.body?.string() }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("homescreen", "showy get: $e")
+        null
     }
 
-    internal suspend fun post(url: String, json: String?): String? = withContext(Dispatchers.IO) {
-        try {
-            val body = (json ?: "").toRequestBody("application/json".toMediaType())
-            Net.client.newCall(Request.Builder().url(url).header("User-Agent", UA).post(body).build())
-                .execute().use { r -> r.body?.string() }
-        } catch (e: Exception) {
-            android.util.Log.w("homescreen", "showy post: $e")
-            null
-        }
+    internal suspend fun post(url: String, json: String?): String? = try {
+        val body = (json ?: "").toRequestBody("application/json".toMediaType())
+        Net.client.newCall(Request.Builder().url(url).header("User-Agent", UA).post(body).build())
+            .await { r -> r.body?.string() }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        android.util.Log.w("homescreen", "showy post: $e")
+        null
     }
 }

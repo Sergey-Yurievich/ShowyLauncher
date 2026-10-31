@@ -61,6 +61,7 @@ import ru.homescreen.tv.data.PlayerPrefs
 import ru.homescreen.tv.data.Prefetch
 import ru.homescreen.tv.data.Segments
 import ru.homescreen.tv.data.Subs
+import ru.homescreen.tv.data.await
 import ru.homescreen.tv.ui.LocalScale
 import ru.homescreen.tv.ui.LocalScaleHolder
 import ru.homescreen.tv.ui.PlayerScreen
@@ -292,14 +293,16 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
         val path = Uri.parse(url).path.orEmpty().lowercase()
         if (".m3u8" in path || path.endsWith(".m3u")) return true
         if ("/stream/" in path || FILES.any { path.endsWith(it) }) return false
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val b = Request.Builder().url(url).header("Range", "bytes=0-15")
-                headers.forEach { (k, v) -> b.header(k, v) }
-                Net.client.newCall(b.build()).execute().use { r ->
-                    r.isSuccessful && r.body?.source()?.let { it.request(7) && it.buffer.readUtf8(7) == "#EXTM3U" } == true
-                }
-            }.getOrDefault(false)
+        val b = Request.Builder().url(url).header("Range", "bytes=0-15")
+        headers.forEach { (k, v) -> b.header(k, v) }
+        return try {
+            Net.client.newCall(b.build()).await { r ->
+                r.isSuccessful && r.body?.source()?.let { it.request(7) && it.buffer.readUtf8(7) == "#EXTM3U" } == true
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            false
         }.also { Log.i("homescreen", "player: ${if (it) "hls" else "file"} by its first bytes") }
     }
 
