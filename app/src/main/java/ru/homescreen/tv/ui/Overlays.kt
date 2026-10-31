@@ -133,26 +133,27 @@ fun SettingsMenu(
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
         val shape = Shapes.menu
         Box(Modifier.fillMaxSize()) {
-            // Linked TVs and hidden apps make it taller than the screen: it scrolls after the focus (see [MenuRow]).
+            // One line per row, the value on the right: the whole menu fits in about the upper half of the screen. Many
+            // linked TVs can still make it taller; it then scrolls after the focus (see [SettingRow]).
             Column(
-                Modifier.offset(x = 1304.u, y = 140.u).width(520.u).heightIn(max = 900.u)
+                Modifier.offset(x = 1244.u, y = 120.u).width(580.u).heightIn(max = 900.u)
                     .shadow(20.u, shape)
                     .clip(shape)
                     .background(Colors.Surface)
                     .verticalScroll(rememberScrollState())
-                    .padding(14.u),
-                verticalArrangement = Arrangement.spacedBy(6.u),
+                    .padding(10.u),
+                verticalArrangement = Arrangement.spacedBy(2.u),
             ) {
                 rows.forEachIndexed { i, r ->
                     val f = i == focus
                     val prev = rows.getOrNull(i - 1)?.kind
                     when (r.kind) {
                         SettingsKind.UPDATE -> {
-                            val version = "Версия ${ru.homescreen.tv.BuildConfig.VERSION_NAME}"
+                            val version = ru.homescreen.tv.BuildConfig.VERSION_NAME
                             when {
-                                update != null -> MenuRow(if (updating) "Скачиваю $update…" else "Обновить до $update", version, Icons.Down, f, false)
-                                checking -> MenuRow("Проверяю обновления…", version, Icons.Refresh, f, false)
-                                else -> MenuRow("Проверить обновления", version, Icons.Refresh, f, false)
+                                update != null -> SettingRow(if (updating) "Скачиваю $update…" else "Обновить до $update", version, Icons.Down, f)
+                                checking -> SettingRow("Проверяю обновления…", version, Icons.Refresh, f)
+                                else -> SettingRow("Проверить обновления", version, Icons.Refresh, f)
                             }
                         }
                         SettingsKind.SERVER -> {
@@ -161,30 +162,29 @@ fun SettingsMenu(
                                 MenuHeader("Источник фильмов")
                             }
                             val s = r.server ?: return@forEachIndexed
-                            MenuRow(s.label, s.host.substringAfter("//"), null, f, s == current)
+                            // The chosen one has its check where the other rows have an icon.
+                            SettingRow(s.label, s.host.substringAfter("//"), if (s == current) Icons.Check else null, f)
                         }
                         SettingsKind.SKIP -> {
                             MenuDivider()
-                            MenuHeader("Плеер")
-                            MenuRow("Пропускать заставки сами", "С кнопкой «Вернуться»", Icons.SkipAhead, f, PlayerPrefs.skipIntros)
+                            SettingRow("Пропускать заставки", null, Icons.SkipAhead, f, checked = PlayerPrefs.skipIntros)
                         }
                         SettingsKind.LINK -> {
                             MenuDivider()
-                            MenuHeader("Другие ТВ")
                             when {
-                                pairing -> MenuRow("Ищу другой ТВ…", "Выберите то же на втором ТВ", Icons.Link, f, false)
-                                peers.isEmpty() -> MenuRow("Связать с другим ТВ", "Общие история и закладки", Icons.Link, f, false)
-                                else -> MenuRow("Связать ещё один ТВ", "Связано: " + peers.joinToString(", "), Icons.Link, f, false)
+                                pairing -> SettingRow("Ищу другой ТВ…", null, Icons.Link, f)
+                                peers.isEmpty() -> SettingRow("Связать с другим ТВ", null, Icons.Link, f)
+                                else -> SettingRow("Связать ещё ТВ", peers.joinToString(", "), Icons.Link, f)
                             }
                         }
-                        SettingsKind.UNLINK -> MenuRow("Отвязать этот ТВ", null, Icons.Close, f, false)
+                        SettingsKind.UNLINK -> SettingRow("Отвязать этот ТВ", null, Icons.Close, f)
                         SettingsKind.UNHIDE -> {
                             MenuDivider()
-                            MenuRow("Вернуть скрытые приложения", plural(hidden, "приложение", "приложения", "приложений"), Icons.Hide, f, false)
+                            SettingRow("Вернуть скрытые", hidden.toString(), Icons.Hide, f)
                         }
                         SettingsKind.ANDROID -> {
                             if (prev != SettingsKind.UNHIDE) MenuDivider()
-                            MenuRow("Настройки Android", null, Icons.Settings, f, false)
+                            SettingRow("Настройки Android", null, Icons.Settings, f)
                         }
                     }
                 }
@@ -211,12 +211,35 @@ fun ContextMenu(visible: Boolean, items: List<MenuItem>, focus: Int) {
 
 @Composable
 private fun MenuHeader(label: String) {
-    BasicText(label, modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(Type.CAPTION, 500, Colors.Muted))
+    BasicText(label, modifier = Modifier.padding(start = 18.u, top = 4.u, bottom = 2.u), style = text(Type.CAPTION, 500, Colors.Muted))
 }
 
 @Composable
 private fun MenuDivider() {
-    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Colors.Hairline))
+    Box(Modifier.padding(horizontal = 18.u, vertical = 5.u).fillMaxWidth().height(1.u).background(Colors.Hairline))
+}
+
+/** A gear-menu row on one line: icon (or an empty slot, so labels align), label, [value] on the right, a check. */
+@Composable
+private fun SettingRow(label: String, value: String?, icon: ImageVector?, focused: Boolean, checked: Boolean = false) {
+    val fg = if (focused) Colors.FocusFg else Colors.Fg
+    val view = remember { BringIntoViewRequester() }
+    LaunchedEffect(focused) { if (focused) view.bringIntoView() }
+    Row(
+        Modifier.fillMaxWidth().bringIntoViewRequester(view).clip(Shapes.card)
+            .background(if (focused) Colors.Focus else Color.Transparent)
+            .padding(horizontal = 18.u, vertical = 10.u),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.u),
+    ) {
+        Box(Modifier.size(26.u)) { icon?.let { Ico(it, 26.u, fg) } }
+        BasicText(label, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = text(Type.SMALL, 500, fg))
+        value?.let {
+            BasicText(it, Modifier.widthIn(max = 220.u), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                style = text(Type.CAPTION, 400, if (focused) Colors.OnFocusMuted else Colors.Muted))
+        }
+        if (checked) Ico(Icons.Check, 26.u, fg)
+    }
 }
 
 @Composable
