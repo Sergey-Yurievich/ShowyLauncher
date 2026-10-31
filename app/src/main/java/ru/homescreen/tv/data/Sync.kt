@@ -403,12 +403,15 @@ class Sync(
 
     // ---------- Peers ----------
 
+    // Announcements, pairing and syncs land on different threads: one at a time, or a peer read before another's write is lost.
+    private val peersLock = Any()
+
     private fun upsert(p: Peer) {
         if (p.id.isEmpty()) return
-        savePeers(peers.filter { it.id != p.id } + p)
+        synchronized(peersLock) { savePeers(peers.filter { it.id != p.id } + p) }
     }
 
-    private fun savePeers(list: List<Peer>) {
+    private fun savePeers(list: List<Peer>) = synchronized(peersLock) {
         peers = list
         prefs.edit().putString("peers", JSONArray(list.map {
             JSONObject().put("id", it.id).put("n", it.name).put("h", it.host).put("p", it.port)

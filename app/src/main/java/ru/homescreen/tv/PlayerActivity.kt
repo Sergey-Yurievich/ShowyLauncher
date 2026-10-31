@@ -86,6 +86,8 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     private var loadJob: Job? = null
     /** Some file got as far as playing: an error after that is not Media3 failing to read it. */
     private var opened = false
+    /** Network errors in a row since the file last played; past [MAX_RETRIES] the player gives up. */
+    private var retries = 0
     /** TheIntroDB is asked once per episode, when its length is known. */
     private var segmentsAsked = false
     private var ended = false
@@ -131,6 +133,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
                 controls.loading = state == Player.STATE_BUFFERING || state == Player.STATE_IDLE
                 if (state == Player.STATE_READY) {
                     opened = true
+                    retries = 0
                     askSegments()
                 }
                 if (state == Player.STATE_ENDED) onEnded()
@@ -138,6 +141,13 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
 
             override fun onPlayerError(error: PlaybackException) {
                 Log.w("homescreen", "player: ${error.errorCodeName} opened=$opened in ${playback.title} #${controls.index}", error)
+                // A torrent or a proxy dropping mid-film: the player waits a little and goes on from the same place.
+                if (opened && error.errorCode in NETWORK_ERRORS && retries < MAX_RETRIES) {
+                    retries++
+                    controls.loading = true
+                    lifecycleScope.launch { delay(RETRY_DELAY_MS); player.prepare() }
+                    return
+                }
                 done(4)
             }
 
@@ -214,6 +224,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
                 return@launch
             }
             current = o
+            retries = 0
             segmentsAsked = false
             ended = false
             controls.startItem(i)
@@ -257,8 +268,9 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
      * would garble) and handed to Media3 beside the file's embedded ones.
      */
     private suspend fun sideload(tracks: List<Subs.Track>): List<MediaItem.SubtitleConfiguration> = coroutineScope {
-        val dir = File(cacheDir, "subs").apply { deleteRecursively(); mkdirs() }
-        tracks.take(12).mapIndexed { k, t -> async { Subs.fetch(t.url)?.let { k to it } } }.mapNotNull { it.await() }.map { (k, text) ->
+        val dir = withContext(Dispatchers.IO) { File(cacheDir, "subs").apply { deleteRecursively(); mkdirs() } }
+        val fetched = tracks.take(12).mapIndexed { k, t -> async { Subs.fetch(t.url)?.let { k to it } } }.mapNotNull { it.await() }
+        withContext(Dispatchers.IO) { fetched.map { (k, text) ->
             val t = tracks[k]
             val (ext, mime) = when {
                 text.trimStart().startsWith("WEBVTT") -> "vtt" to MimeTypes.TEXT_VTT
@@ -269,7 +281,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
             MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file)).setMimeType(mime).setLabel(t.label)
                 .setLanguage(Subs.language(t.label)).setId("link$k")
                 .setSelectionFlags(if (Subs.rank(t.label) == 2) C.SELECTION_FLAG_FORCED else 0).build()
-        }
+        } }
     }
 
     /**
@@ -541,6 +553,10 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     companion object {
         /** About 10 s of an 80 Mbit/s 4K remux, half a minute and more of anything lighter. */
         private const val BUFFER_BYTES = 96 shl 20
+        /** Media3's input/output errors (ERROR_CODE_IO_*): the connection, not the file. */
+        private val NETWORK_ERRORS = 2000..2999
+        private const val MAX_RETRIES = 2
+        private const val RETRY_DELAY_MS = 2_000L
         private val HANDLED = setOf(
             KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER,
             KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN,

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -94,7 +95,12 @@ object Updater {
             }
             if (!ok) { problem = "Не удалось скачать обновление"; return }
             if (!sameSigner(context, apk)) { problem = "Обновление подписано чужим ключом — не ставлю"; apk.delete(); return }
-            withContext(Dispatchers.IO) { commit(context, apk) }
+            val failure = withContext(Dispatchers.IO) { runCatching { commit(context, apk) }.exceptionOrNull() }
+            if (failure != null) {
+                Log.w("homescreen", "update: install session failed", failure)
+                context.getSharedPreferences("homescreen", Context.MODE_PRIVATE).edit().putBoolean("updating", false).apply()
+                problem = "Обновление не установилось: ${failure.message ?: "ошибка установщика"}"
+            }
         } finally {
             busy = false
         }
@@ -133,13 +139,19 @@ object Updater {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
         }
         val id = installer.createSession(params)
-        installer.openSession(id).use { s ->
-            apk.inputStream().use { input -> s.openWrite(ASSET, 0, apk.length()).use { out -> input.copyTo(out); s.fsync(out) } }
-            val status = PendingIntent.getBroadcast(
-                context, id, Intent(context, StatusReceiver::class.java),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-            )
-            s.commit(status.intentSender)
+        // A session left open on a failed write would hold the APK's space until the next boot.
+        try {
+            installer.openSession(id).use { s ->
+                apk.inputStream().use { input -> s.openWrite(ASSET, 0, apk.length()).use { out -> input.copyTo(out); s.fsync(out) } }
+                val status = PendingIntent.getBroadcast(
+                    context, id, Intent(context, StatusReceiver::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                s.commit(status.intentSender)
+            }
+        } catch (e: Exception) {
+            runCatching { installer.abandonSession(id) }
+            throw e
         }
     }
 

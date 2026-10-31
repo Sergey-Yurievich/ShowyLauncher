@@ -19,17 +19,23 @@ class Store(context: Context) {
     private val details = LinkedHashMap<String, Pair<Long, Details>>(64, 0.75f, true)
 
     suspend fun open() = withContext(Dispatchers.IO) {
-        rows = read(rowsFile)
+        val r = read(rowsFile)
         val d = read(detailsFile)
         val now = System.currentTimeMillis()
-        d.keys().forEach { k ->
-            val o = d.optJSONObject(k) ?: return@forEach
-            val t = o.optLong("t")
-            if (now - t < DETAILS_TTL) details[k] = t to detailsFromJson(o.getJSONObject("d"))
+        synchronized(this@Store) {
+            rows = r
+            d.keys().forEach { k ->
+                val o = d.optJSONObject(k) ?: return@forEach
+                val t = o.optLong("t")
+                if (now - t < DETAILS_TTL) details[k] = t to detailsFromJson(o.getJSONObject("d"))
+            }
         }
     }
 
+    // Every read is synchronized too: `details` keeps access order, so even a get rearranges it.
+
     /** Cached row and its age in ms, or null. */
+    @Synchronized
     fun row(id: String): Pair<List<Title>, Long>? {
         val o = rows.optJSONObject(id) ?: return null
         val age = System.currentTimeMillis() - o.optLong("t")
@@ -44,6 +50,7 @@ class Store(context: Context) {
         rows.put(id, JSONObject().put("t", System.currentTimeMillis()).put("items", JSONArray(items.map(::titleToJson))))
     }
 
+    @Synchronized
     fun details(key: String): Details? = details[key]?.second
 
     @Synchronized

@@ -459,7 +459,10 @@ class WatchSession(
             key = title.key, title = title.name, tmdbId = title.id, serial = serial, items = items, start = at,
             open = open@{ k ->
                 val f = list[k]
-                val s = if (k == at && last === first) first else runCatching { Showy.stream(f) }.getOrNull()?.withSubtitles(f) ?: return@open null
+                // Cancelled when another episode is picked: that must not read as «Серия не открылась».
+                val s = if (k == at && last === first) first
+                    else (try { Showy.stream(f) } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; null })
+                        ?.withSubtitles(f) ?: return@open null
                 last = s
                 val start = startOf(f)
                 before = beforePlaying(f)
@@ -495,7 +498,8 @@ class WatchSession(
                 if (!launch(Vimu.intent(urls, listOf(label(f)), start, last.headers)) { c, d -> note = ""; result(listOf(f), urls, Vimu.result(c, d), b) }) note = "ViMu не установлен"
                 return@launch
             }
-            if (code == 4) note = "Видео не открылось. Попробуйте другой источник или озвучку."
+            if (code == 4) note = if (data?.getBooleanExtra("opened", false) == true) "Видео прервалось. Попробуйте ещё раз или другой источник."
+                else "Видео не открылось. Попробуйте другой источник или озвучку."
             marks++
             idx = startIndex()
             onPlayed()

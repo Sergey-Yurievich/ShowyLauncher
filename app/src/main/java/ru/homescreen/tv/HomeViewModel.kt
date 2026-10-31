@@ -470,8 +470,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         if (details.containsKey(k) || !pending.add(k)) return
         store.details(k)?.let { details[k] = it; pending.remove(k); return }
         viewModelScope.launch {
-            val d = Tmdb.details(t.media, t.id)
-            pending.remove(k)
+            val d = try { Tmdb.details(t.media, t.id) } finally { pending.remove(k) }
             if (d != null) {
                 details[k] = d
                 store.saveDetails(k, d)
@@ -479,14 +478,17 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private val accentGate = Semaphore(2)
+
     /** The dominant colour of a backdrop, for the glow and tint; computed from a small copy, once per image. */
     fun requestAccent(url: String?) {
         if (url == null || accents.containsKey(url)) return
         accents[url] = Color.Unspecified
         viewModelScope.launch {
-            val r = ctx.imageLoader.execute(
-                ImageRequest.Builder(ctx).data(url).size(96, 54).allowHardware(false).build(),
-            )
+            // Software bitmaps sit in the Java heap: a fast scroll through a row would decode a dozen at once.
+            val r = accentGate.withPermit {
+                ctx.imageLoader.execute(ImageRequest.Builder(ctx).data(url).size(96, 54).allowHardware(false).build())
+            }
             val bmp = ((r as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap ?: return@launch
             val sw = withContext(Dispatchers.Default) {
                 val p = Palette.from(bmp).generate()

@@ -111,6 +111,7 @@ class SearchSession(
     private suspend fun show() {
         val q = query.trim()
         if (q.length < 2) {
+            loading = false
             searched = false
             failed = false
             results = popular()
@@ -119,8 +120,8 @@ class SearchSession(
             return
         }
         loading = true
-        val found = Tmdb.search(q)
-        loading = false
+        // A newer letter cancels this search: the spinner must not outlive it.
+        val found = try { Tmdb.search(q) } finally { loading = false }
         if (q != query.trim()) return
         searched = true
         failed = found == null
