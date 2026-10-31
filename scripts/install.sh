@@ -52,6 +52,11 @@ A shell pm grant "$PKG" com.android.providers.tv.permission.READ_EPG_DATA >/dev/
 A shell appops set "$PKG" REQUEST_INSTALL_PACKAGES allow >/dev/null 2>&1 || true
 # Lets the launcher put its remote-buttons service back when force-stopping it has cleared the list (KeysService).
 A shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1 || true
+# TCL's app-boot guard (TclAppBoot): without AUTO_START it refuses to bind KeysService after an update, so the TV is
+# left without a home screen until Home is pressed (Android's own restart of Home fails while the package is still
+# frozen); without ASSOC_START it drops the installer's answer to Updater. Not TCL: unknown ops, the lines fail harmlessly.
+A shell appops set "$PKG" AUTO_START allow >/dev/null 2>&1 || true
+A shell appops set "$PKG" ASSOC_START allow >/dev/null 2>&1 || true
 
 # The only home screen. The first-run wizard goes first, while Google TV's home still owns Home: once that is off,
 # the wizard's recovery screen would claim Home itself. A saved Wi-Fi network owned by the wizard would be deleted
