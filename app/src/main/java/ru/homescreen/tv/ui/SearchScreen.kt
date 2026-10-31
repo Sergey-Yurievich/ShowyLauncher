@@ -65,14 +65,14 @@ fun SearchScreen(s: SearchSession?, voice: VoiceInput, visible: Boolean) {
         val focused = if (w.zone == Zone.RESULTS) w.results.getOrNull(w.idx) else null
         Box(Modifier.fillMaxSize().background(Colors.Bg)) {
             focused?.backdrop?.let {
-                AsyncImage(Tmdb.img(it, "w780"), null, Modifier.fillMaxSize().graphicsLayer { alpha = 0.3f }, contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color(0xFA050608), 0.6f to Color(0xD9050608), 1f to Color(0x99050608))))
+                AsyncImage(Tmdb.img(it, "w780"), null, Modifier.fillMaxSize(), alpha = 0.3f, contentScale = ContentScale.Crop)
+                BakedGradient(listOf(0f to Color(0xFA050608), 0.6f to Color(0xD9050608), 1f to Color(0x99050608)), Modifier.fillMaxSize())
             }
 
             // What is typed, with a caret; a hint while empty. Listening: the words so far, then the jumping dots.
             Row(Modifier.offset(x = 96.u, y = 92.u).widthIn(max = 620.u), verticalAlignment = Alignment.CenterVertically) {
-                if (w.query.isNotEmpty()) BasicText(w.query, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 520.u), style = text(40, 700))
-                else if (!voice.listening) BasicText("Фильм или сериал", style = text(40, 500, Colors.Faint))
+                if (w.query.isNotEmpty()) BasicText(w.query, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 520.u), style = text(Type.TITLE, 700))
+                else if (!voice.listening) BasicText("Фильм или сериал", style = text(Type.TITLE, 500, Colors.Faint))
                 if (voice.listening) {
                     if (w.query.isNotEmpty()) Spacer(Modifier.width(20.u))
                     VoiceDots(voice)
@@ -113,15 +113,16 @@ private fun Keyboard(w: SearchSession) {
                 line.forEachIndexed { i, k ->
                     val f = focus != null && r == w.row && focus.first == i
                     val fg = if (f) Colors.FocusFg else Colors.Fg
+                    val sc by animateFloatAsState(if (f) FocusSpec.CONTROL else 1f, label = "key")
                     Box(
-                        Modifier.size((KEY_W * k.span + KEY_GAP * (k.span - 1)).u, KEY_H.u).clip(RoundedCornerShape(16.u))
-                            .background(if (f) Color.White else if (k.act == Act.CHAR) Color(0x14FFFFFF) else Color(0x24FFFFFF)),
+                        Modifier.size((KEY_W * k.span + KEY_GAP * (k.span - 1)).u, KEY_H.u).graphicsLayer { scaleX = sc; scaleY = sc }.clip(Shapes.card)
+                            .background(if (f) Colors.Focus else if (k.act == Act.CHAR) Colors.Pale else Colors.PaleStrong),
                         contentAlignment = Alignment.Center,
                     ) {
                         when (k.act) {
                             Act.VOICE -> Ico(Icons.Mic, 30.u, fg)
-                            Act.CHAR -> BasicText(k.label, style = text(28, 500, fg))
-                            else -> BasicText(k.label, style = text(22, 600, fg))
+                            Act.CHAR -> BasicText(k.label, style = text(Type.LARGE, 500, fg))
+                            else -> BasicText(k.label, style = text(Type.CAPTION, 600, fg))
                         }
                     }
                 }
@@ -140,10 +141,17 @@ private fun Results(w: SearchSession) {
     // Header: the focused title, otherwise what the grid is.
     Column(Modifier.offset(x = RESULTS_X.u, y = 160.u).widthIn(max = 1060.u)) {
         if (focused != null) {
-            BasicText(focused.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = text(32, 700))
-            val meta = listOfNotNull(focused.year.takeIf { it.isNotEmpty() }, if (focused.media == Media.TV) "Сериал" else "Фильм",
-                focused.vote.takeIf { it > 0 }?.let { "★ %.1f".format(it) }, if (w.sources[focused.key] == false) "нет в источниках" else null)
-            BasicText(meta.joinToString("  ·  "), style = text(22, 400, Colors.Muted))
+            BasicText(focused.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = text(Type.LARGE, 700))
+            // The same facts line as the hero: the star is the icon, the facts are spaced, not dotted.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.u)) {
+                if (focused.vote > 0) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.u)) {
+                    Ico(Icons.Star, 24.u, Colors.Gold)
+                    BasicText("%.1f".format(focused.vote), style = text(Type.SMALL, 700))
+                }
+                focused.year.takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(Type.SMALL, 400, Colors.Muted)) }
+                BasicText(if (focused.media == Media.TV) "Сериал" else "Фильм", style = text(Type.SMALL, 400, Colors.Muted))
+                if (w.sources[focused.key] == false) BasicText("Нет в источниках", style = text(Type.SMALL, 400, Colors.Muted))
+            }
         } else {
             val label = when {
                 w.loading -> "Ищем…"
@@ -152,7 +160,7 @@ private fun Results(w: SearchSession) {
                 w.searched -> "Найдено"
                 else -> "Популярное сейчас"
             }
-            BasicText(label, style = text(28, 600, Colors.Muted))
+            BasicText(label, style = text(Type.LARGE, 600, Colors.Muted))
         }
     }
 
@@ -165,14 +173,22 @@ private fun Results(w: SearchSession) {
             if (r in firstRow..focusRow + 3) Row(Modifier.offset(y = (r * step).u), horizontalArrangement = Arrangement.spacedBy(POSTER_GAP.u)) {
                 line.forEachIndexed { c, t ->
                     val f = inGrid && r * cols + c == w.idx
-                    val sc by animateFloatAsState(if (f) 1.08f else 1f, label = "ss")
-                    val shape = RoundedCornerShape(18.u)
+                    val p = animateFloatAsState(if (f) 1f else 0f, tween(200), label = "ss")
+                    val shape = Shapes.card
+                    val px = LocalScaleHolder.px
                     // No sources in Showy: grey and dim, still openable.
                     val none = w.sources[t.key] == false
-                    Box(Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer { scaleX = sc; scaleY = sc }.clip(shape).background(Color(0xFF15171C))) {
-                        AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize().graphicsLayer { alpha = if (none) 0.35f else 1f },
+                    Box(
+                        Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer {
+                            val k = 1f + (FocusSpec.TILE - 1f) * p.value
+                            scaleX = k; scaleY = k
+                            shadowElevation = 30f * p.value * px
+                            this.shape = shape; clip = true
+                        }.background(Colors.Placeholder),
+                    ) {
+                        AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), alpha = if (none) 0.35f else 1f,
                             contentScale = ContentScale.Crop, colorFilter = if (none) GREY else null)
-                        if (f) Box(Modifier.fillMaxSize().border(3.u, Color(0xE6FFFFFF), shape))
+                        if (f) Box(Modifier.fillMaxSize().border(FocusSpec.RING.u, Colors.FocusRing, shape))
                     }
                 }
             }

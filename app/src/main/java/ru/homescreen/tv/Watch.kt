@@ -354,6 +354,13 @@ class WatchSession(
 
     fun mark(item: Showy.Item): History.Mark? = history.mark(title.key, item.season, item.episode)
 
+    /**
+     * The progress bar of a file's row. A film's files are its voices and share one mark: it goes on the voice last played only, not
+     * on every row (on all of them if that voice is gone from the list).
+     */
+    fun rowMark(item: Showy.Item): History.Mark? =
+        if (!serial && item.text != choice.voice && files.any { it.text == choice.voice }) null else mark(item)
+
     /** The file's season number: its own `s`, else the picked season's "2 сезон". */
     fun seasonOf(item: Showy.Item): Int =
         item.season.takeIf { it > 0 } ?: seasons.getOrNull(season)?.text?.let { Regex("\\d+").find(it)?.value?.toIntOrNull() } ?: 1

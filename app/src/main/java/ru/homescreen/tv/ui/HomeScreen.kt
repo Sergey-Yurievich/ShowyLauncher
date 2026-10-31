@@ -141,16 +141,9 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         else -> featured.getOrNull(nav.slide % featured.size.coerceAtLeast(1))
     }
     heroTitle?.let { LaunchedEffect(it.key) { delay(150); vm.requestDetails(it) } }
-    val hero: HeroData? = when {
-        heroTitle != null -> heroOf(heroTitle, vm.details[heroTitle.key], vm.newEpisode(heroTitle))
-        curTile is CollectionTile -> HeroData(curTile.key, curTile.name, null, 0.0, emptyList(), null, curTile.caption.ifEmpty { null },
-            "Вся подборка рядом на вкладке «${vm.tabOf(curTile.categoryId).label}». Состав обновляется сам.")
-        curTile is GenreTile -> HeroData(curTile.key, curTile.name, null, 0.0, listOf(if (curTile.media == Media.TV) "Сериалы" else "Фильмы"), null, null,
-            if (curTile.top.isEmpty()) "Самое популярное в жанре." else "Сейчас смотрят: " + curTile.top.joinToString(", ") + ".")
-        curTile is AppTile -> HeroData(curTile.key, curTile.app.label, null, 0.0, emptyList(), null, null, "Нажмите OK, чтобы открыть.")
-        curTile is MoreTile -> null
-        else -> null
-    }
+    // Only a title has a hero. An app, a genre or a collection already carries its name on the tile, and the hero
+    // would repeat it; their picture stays behind as the backdrop.
+    val hero: HeroData? = heroTitle?.let { heroOf(it, vm.details[it.key], vm.newEpisode(it)) }
     // In the rows the hero follows the focus once it rests: a new hero costs ~30 ms of UI thread on this TV, and doing
     // it on every press of a fast scroll showed as a hitch. Same-title updates (details arriving) go through at once.
     var heroShown by remember { androidx.compose.runtime.mutableStateOf(hero) }
@@ -203,7 +196,9 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
     }
 
     val console = Inputs.console(vm.inputs)
-    val actions = Actions(ctx, vm, nav, scope, rows, featured, console?.first)
+    // Rebuilt when what it acts on changes, not on every press.
+    val consoleInput = console?.first
+    val actions = remember(rows, featured, consoleInput) { Actions(ctx, vm, nav, scope, rows, featured, consoleInput) }
 
     // The remote's microphone button, from anywhere: search, listening.
     LaunchedEffect(voicePresses) {
@@ -236,6 +231,7 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
             if ("img" in OFF) null else shownBackdrop, accent, rowsMode, nav.trailer,
             shiftX = if (rowsMode) -minOf(nav.col, 6) * 7f else 0f,
             shiftY = if (rowsMode) -nav.row * 5f else 0f,
+            picture = nav.tab != Tab.APPS,
         )
         val row = rows.getOrNull(nav.row)
         val anchor = row?.let { Geo.tileAnchor(it, nav.col) }

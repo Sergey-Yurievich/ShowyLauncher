@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -42,7 +43,9 @@ private val Ink = Color(0xFF050608)
  * so they never recompose the screen.
  */
 @Composable
-fun Backdrop(url: String?, accent: State<Color>, rowsMode: Boolean, trailer: Boolean, shiftX: Float, shiftY: Float) {
+fun Backdrop(url: String?, accent: State<Color>, rowsMode: Boolean, trailer: Boolean, shiftX: Float, shiftY: Float, picture: Boolean = true) {
+    // Off (the Приложения tab): a film's still behind the apps would belong to nothing on the screen.
+    val shown = animateFloatAsState(if (picture) 1f else 0f, tween(400), label = "shown")
     val tr = animateFloatAsState(if (trailer) 1f else 0f, tween(900), label = "tr")
     val rows = animateFloatAsState(if (rowsMode) 1f else 0f, tween(600), label = "rows")
     val sx = animateFloatAsState(shiftX, tween(1400, easing = FastOutSlowInEasing), label = "sx")
@@ -77,6 +80,7 @@ fun Backdrop(url: String?, accent: State<Color>, rowsMode: Boolean, trailer: Boo
 
     Box(Modifier.fillMaxSize()) {
         val camera = Modifier.fillMaxSize().graphicsLayer {
+            alpha = shown.value; compositingStrategy = CompositingStrategy.ModulateAlpha
             val s = 1.04f * zoom.value
             scaleX = s; scaleY = s
             translationX = sx.value * LocalScaleHolder.px
@@ -142,3 +146,39 @@ fun Pool(cx: Float, cy: Float, visible: Boolean, accent: State<Color>) {
 }
 
 object DebugOff { var set: Set<String> = emptySet() }
+
+/**
+ * A full-screen gradient baked once into a strip (or, for [corner], a small bitmap) and drawn stretched: a texture
+ * costs this GPU next to nothing, a multi-stop gradient shader over the whole screen costs every frame (see [scrim]).
+ * [stops] go left to right, or top to bottom when [vertical].
+ */
+@Composable
+fun BakedGradient(stops: List<Pair<Float, Color>>, modifier: Modifier, vertical: Boolean = false) {
+    val img = remember(stops, vertical) {
+        val n = 256
+        val bmp = android.graphics.Bitmap.createBitmap(if (vertical) 1 else n, if (vertical) n else 1, android.graphics.Bitmap.Config.ARGB_8888)
+        val p = android.graphics.Paint()
+        p.shader = android.graphics.LinearGradient(0f, 0f, if (vertical) 0f else n.toFloat(), if (vertical) n.toFloat() else 0f,
+            stops.map { it.second.toArgb() }.toIntArray(), stops.map { it.first }.toFloatArray(), android.graphics.Shader.TileMode.CLAMP)
+        android.graphics.Canvas(bmp).drawRect(0f, 0f, bmp.width.toFloat(), bmp.height.toFloat(), p)
+        bmp.asImageBitmap()
+    }
+    Image(img, null, modifier, contentScale = ContentScale.FillBounds)
+}
+
+/** Darkening that fades out from the bottom-right corner, [radius] in 1920-grid units; baked like [BakedGradient]. */
+@Composable
+fun CornerShade(inner: Color, radius: Float, modifier: Modifier = Modifier.fillMaxSize()) {
+    val img = remember(inner, radius) {
+        val w = 480
+        val h = 270
+        val k = w / 1920f
+        val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val p = android.graphics.Paint()
+        p.shader = android.graphics.RadialGradient(w.toFloat(), h.toFloat(), radius * k,
+            intArrayOf(inner.toArgb(), inner.copy(alpha = 0f).toArgb()), null, android.graphics.Shader.TileMode.CLAMP)
+        android.graphics.Canvas(bmp).drawRect(0f, 0f, w.toFloat(), h.toFloat(), p)
+        bmp.asImageBitmap()
+    }
+    Image(img, null, modifier, contentScale = ContentScale.FillBounds)
+}

@@ -39,6 +39,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -62,9 +64,6 @@ import java.util.Date
 import java.util.Locale
 
 private val EnColor = Color(0xFFF2D675)
-private val Card = Color(0xF5141519)
-private val Pale = Color(0x1FFFFFFF)
-private val Sub = Color(0xFF4A4F58)
 
 /**
  * The built-in player's screen over the video (see the mockup «Плеер ShowyLauncher»): the two subtitle lines, the panel
@@ -135,18 +134,17 @@ private fun lineStyle(size: Int, color: Color) = text(size, 500, color).copy(
 @Composable
 private fun Panel(c: PlayerControls) {
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().height(320.u).background(Brush.verticalGradient(listOf(Color(0xE0050608), Color(0x00050608)))))
-        Box(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(560.u)
-                .background(Brush.verticalGradient(0f to Color(0x00050608), 0.55f to Color(0xB3050608), 1f to Color(0xF0050608))),
-        )
+        // Scrims baked into strips: full-screen gradient shaders cost this GPU every frame (see Backdrop).
+        BakedGradient(listOf(0f to Color(0xE0050608), 1f to Color(0x00050608)), Modifier.fillMaxWidth().height(320.u), vertical = true)
+        BakedGradient(listOf(0f to Color(0x00050608), 0.55f to Color(0xB3050608), 1f to Color(0xF0050608)),
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(560.u), vertical = true)
         Column(Modifier.padding(start = 96.u, top = 72.u).width(1200.u), verticalArrangement = Arrangement.spacedBy(10.u)) {
-            BasicText(c.playback.title, style = text(64, 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (c.playback.serial) BasicText(episodeLine(c.item), style = text(30, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(c.playback.title, style = text(Type.DISPLAY, 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (c.playback.serial) BasicText(episodeLine(c.item), style = text(Type.LARGE, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Clock(c, Modifier.align(Alignment.TopEnd).padding(top = 64.u, end = 96.u))
         Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 96.u, end = 96.u, bottom = 72.u).fillMaxWidth(),
+            Modifier.align(Alignment.BottomStart).padding(start = 96.u, end = 96.u, bottom = 96.u).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(40.u),
         ) {
             Bar(c, focused = c.onBar)
@@ -168,25 +166,44 @@ private fun Panel(c: PlayerControls) {
     }
 }
 
-private fun episodeLine(it: Playback.Item) = listOfNotNull("Сезон ${it.season}", "Серия ${it.episode}", it.name).joinToString(" · ")
+private fun episodeLine(it: Playback.Item) = listOfNotNull("Сезон ${it.season}", "Серия ${it.episode}", it.name).joinToString(", ")
 
 @Composable
 private fun Clock(c: PlayerControls, modifier: Modifier) {
     // Read so the clock follows the ticks.
     val left = (c.duration - c.position).coerceAtLeast(0)
     val now = System.currentTimeMillis()
+    // The same zone as the home screen's clock (where the network puts the TV), so the two never differ by an hour.
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val hhmm = remember {
+        val place = ru.homescreen.tv.data.WeatherApi.decode(
+            ctx.getSharedPreferences("homescreen", android.content.Context.MODE_PRIVATE).getString("place", null))
+        SimpleDateFormat("HH:mm", Locale.getDefault()).apply {
+            timeZone = place?.zoneId?.let { java.util.TimeZone.getTimeZone(it) } ?: java.util.TimeZone.getDefault()
+        }
+    }
     Column(modifier, horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.u)) {
-        BasicText(hhmm(now), style = text(72, 300))
-        if (c.duration > 0) BasicText("Конец в ${hhmm(now + left)}", style = text(26, 400, Colors.Muted))
+        BasicText(hhmm.format(Date(now)), style = text(Type.NUMERAL, 300))
+        if (c.duration > 0) BasicText("Конец в ${hhmm.format(Date(now + left))}", style = text(Type.BODY, 400, Colors.Muted))
     }
 }
 
-private fun hhmm(t: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(t))
 
 /** "32 Мбит/с"; below 10, with a decimal: "4,5 Мбит/с". */
 private fun mbits(bps: Long): String {
     val m = bps / 1_000_000.0
     return if (m < 10) String.format(Locale("ru"), "%.1f Мбит/с", m) else "${m.toInt()} Мбит/с"
+}
+
+/** What is on disk ahead of the player, in words: "Запас 42 мин", "Запас 1 ч 05 мин", or "Загружено до конца". */
+internal fun reserve(loadedTo: Long, position: Long, duration: Long): String {
+    if (loadedTo >= duration) return "Загружено до конца"
+    val m = ((loadedTo - position).coerceAtLeast(0) / 60_000).toInt()
+    return when {
+        m < 1 -> "Запас меньше минуты"
+        m < 60 -> "Запас $m мин"
+        else -> "Запас ${m / 60} ч %02d мин".format(m % 60)
+    }
 }
 
 private fun time(ms: Long): String {
@@ -208,27 +225,27 @@ private fun subsLabel(c: PlayerControls): String {
 
 @Composable
 private fun RoundButton(icon: ImageVector, focused: Boolean) {
-    val sc by animateFloatAsState(if (focused) 1.06f else 1f, label = "rb")
+    val sc by animateFloatAsState(if (focused) FocusSpec.CONTROL else 1f, label = "rb")
     Box(
         Modifier.size(88.u).graphicsLayer { scaleX = sc; scaleY = sc }.clip(CircleShape)
-            .then(if (focused) Modifier.background(Colors.Focus) else Modifier.background(Pale)),
+            .then(if (focused) Modifier.background(Colors.Focus) else Modifier.background(Colors.Pale)),
         contentAlignment = Alignment.Center,
     ) { Ico(icon, 38.u, if (focused) Colors.FocusFg else Colors.Fg) }
 }
 
 @Composable
 private fun Pill(icon: ImageVector?, label: String, focused: Boolean) {
-    val sc by animateFloatAsState(if (focused) 1.05f else 1f, label = "pill")
+    val sc by animateFloatAsState(if (focused) FocusSpec.CONTROL else 1f, label = "pill")
     val fg = if (focused) Colors.FocusFg else Colors.Fg
     Row(
-        Modifier.height(72.u).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(36.u))
-            .then(if (focused) Modifier.background(Colors.Focus) else Modifier.background(Pale))
+        Modifier.height(72.u).graphicsLayer { scaleX = sc; scaleY = sc }.clip(Shapes.pill)
+            .then(if (focused) Modifier.background(Colors.Focus) else Modifier.background(Colors.Pale))
             .padding(start = if (icon != null) 26.u else 32.u, end = 32.u),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.u),
     ) {
         icon?.let { Ico(it, 32.u, fg) }
-        BasicText(label, style = text(28, 500, fg))
+        BasicText(label, style = text(Type.LARGE, 500, fg))
     }
 }
 
@@ -236,8 +253,8 @@ private fun Pill(icon: ImageVector?, label: String, focused: Boolean) {
 private fun Badge(label: String) {
     BasicText(
         label,
-        Modifier.border(2.u, Color(0x61ECEFF5), RoundedCornerShape(10.u)).padding(horizontal = 12.u, vertical = 6.u),
-        style = text(22, 600, Color(0xC7ECEFF5)),
+        Modifier.background(Colors.Pale, Shapes.small).padding(horizontal = 12.u, vertical = 6.u),
+        style = text(Type.CAPTION, 600, Colors.Body),
     )
 }
 
@@ -256,13 +273,13 @@ private fun Bar(c: PlayerControls, focused: Boolean) {
             BoxWithConstraints(Modifier.fillMaxWidth().height(36.u)) {
                 val w = maxWidth
                 val frac = (shown.toFloat() / d).coerceIn(0f, 1f)
-                val shape = RoundedCornerShape(5.u)
+                val shape = Shapes.pill
                 Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(thick).clip(shape).background(Color(0x38FFFFFF)))
                 Box(Modifier.align(Alignment.CenterStart).fillMaxWidth((c.buffered.toFloat() / d).coerceIn(0f, 1f)).height(thick).clip(shape).background(Color(0x61FFFFFF)))
                 Box(Modifier.align(Alignment.CenterStart).fillMaxWidth(frac).height(thick).clip(shape).background(Colors.Fg))
                 if (target != null) {
                     val from = (c.seekFrom.toFloat() / d).coerceIn(0f, 1f)
-                    Box(Modifier.align(Alignment.CenterStart).offset(x = w * from - 2.u).size(4.u, 30.u).clip(RoundedCornerShape(2.u)).background(Color(0xB3ECEFF5)))
+                    Box(Modifier.align(Alignment.CenterStart).offset(x = w * from - 2.u).size(4.u, 30.u).clip(Shapes.pill).background(Color(0xB3ECEFF5)))
                 }
                 if (big) Box(
                     Modifier.align(Alignment.CenterStart).offset(x = w * frac - 18.u).size(36.u)
@@ -270,12 +287,12 @@ private fun Bar(c: PlayerControls, focused: Boolean) {
                 )
             }
             Row(Modifier.fillMaxWidth()) {
-                BasicText(time(shown), style = text(28, 500))
+                BasicText(time(shown), style = text(Type.LARGE, 500))
                 Spacer(Modifier.weight(1f))
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.u)) {
-                    BasicText("−" + time(d - shown), style = text(28, 400, Colors.Muted))
-                    c.loaded?.let { BasicText("Загружено ${(it * 100).toInt()}%", style = text(22, 400, Colors.Muted)) }
-                    if (c.loaded != null && c.speed > 0) BasicText(mbits(c.speed), style = text(22, 400, Colors.Muted))
+                    BasicText("−" + time(d - shown), style = text(Type.LARGE, 400, Colors.Muted))
+                    c.loadedTo?.let { BasicText(reserve(it, c.position, d), style = text(Type.CAPTION, 400, Colors.Muted)) }
+                    if (c.loadedTo != null && c.speed > 0) BasicText(mbits(c.speed), style = text(Type.CAPTION, 400, Colors.Muted))
                 }
             }
         }
@@ -292,12 +309,12 @@ private fun Bubble(c: PlayerControls, target: Long, d: Long) {
         val delta = target - c.seekFrom
         Column(
             // The bar's slot has no height for it: measured on its own, drawn above the knob.
-            Modifier.wrapContentHeight(Alignment.Top, unbounded = true).offset(x = x, y = (-128).u).width(240.u).shadow(24.u, RoundedCornerShape(20.u)).clip(RoundedCornerShape(20.u))
+            Modifier.wrapContentHeight(Alignment.Top, unbounded = true).offset(x = x, y = (-128).u).width(240.u).shadow(24.u, Shapes.card).clip(Shapes.card)
                 .background(Colors.Focus).padding(top = 14.u, bottom = 12.u),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            BasicText(time(target), style = text(48, 600, Colors.FocusFg))
-            BasicText((if (delta >= 0) "+" else "−") + time(kotlin.math.abs(delta)), style = text(24, 500, Sub))
+            BasicText(time(target), style = text(Type.HEADING, 600, Colors.FocusFg))
+            BasicText((if (delta >= 0) "+" else "−") + time(kotlin.math.abs(delta)), style = text(Type.SMALL, 500, Colors.OnFocusMuted))
         }
     }
 }
@@ -305,10 +322,8 @@ private fun Bubble(c: PlayerControls, target: Long, d: Long) {
 @Composable
 private fun SeekOverlay(c: PlayerControls) {
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(380.u)
-                .background(Brush.verticalGradient(0f to Color(0x00050608), 0.5f to Color(0x99050608), 1f to Color(0xEB050608))),
-        )
+        BakedGradient(listOf(0f to Color(0x00050608), 0.5f to Color(0x99050608), 1f to Color(0xEB050608)),
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(380.u), vertical = true)
         Column(Modifier.align(Alignment.BottomStart).padding(start = 96.u, end = 96.u, bottom = 96.u).fillMaxWidth()) { Bar(c, focused = true) }
     }
 }
@@ -318,7 +333,7 @@ private fun SeekOverlay(c: PlayerControls) {
 @Composable
 private fun MenuShade() {
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.align(Alignment.CenterEnd).width(1300.u).fillMaxHeight().background(Brush.horizontalGradient(listOf(Color(0x00050608), Color(0xCC050608)))))
+        BakedGradient(listOf(0f to Color(0x00050608), 1f to Color(0xCC050608)), Modifier.align(Alignment.CenterEnd).width(1300.u).fillMaxHeight())
     }
 }
 
@@ -326,8 +341,9 @@ private fun MenuShade() {
 private fun MenuCard(width: Int, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         Column(
-            Modifier.align(Alignment.BottomEnd).padding(end = 72.u, bottom = 72.u).width(width.u)
-                .shadow(40.u, RoundedCornerShape(32.u)).clip(RoundedCornerShape(32.u)).background(Card).padding(16.u),
+            // The same surface, corners and padding as the menus on Home; on the same 96 margins as the panel.
+            Modifier.align(Alignment.BottomEnd).padding(end = 96.u, bottom = 96.u).width(width.u)
+                .shadow(20.u, Shapes.menu).clip(Shapes.menu).background(Colors.Surface).padding(14.u),
             verticalArrangement = Arrangement.spacedBy(6.u),
         ) { content() }
     }
@@ -335,23 +351,23 @@ private fun MenuCard(width: Int, content: @Composable () -> Unit) {
 
 @Composable
 private fun MenuTitle(label: String) {
-    BasicText(label, Modifier.padding(start = 24.u, top = 20.u, bottom = 10.u), style = text(26, 500, Colors.Muted))
+    BasicText(label, Modifier.padding(start = 24.u, top = 20.u, bottom = 10.u), style = text(Type.BODY, 500, Colors.Muted))
 }
 
 @Composable
 private fun Choice(title: String, sub: String?, focused: Boolean, checked: Boolean, modifier: Modifier = Modifier) {
     val fg = if (focused) Colors.FocusFg else Colors.Fg
-    val sc by animateFloatAsState(if (focused) 1.02f else 1f, label = "ch")
+    // A row only turns white (no scale), as the menus on Home do.
     Row(
-        modifier.fillMaxWidth().graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(20.u))
+        modifier.fillMaxWidth().clip(Shapes.card)
             .then(if (focused) Modifier.background(Colors.Focus) else Modifier)
-            .padding(horizontal = 22.u, vertical = 16.u),
+            .padding(horizontal = 20.u, vertical = 16.u),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.u),
     ) {
         Column(Modifier.weight(1f)) {
-            BasicText(title, style = text(28, if (focused) 600 else 500, fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (sub != null) BasicText(sub, style = text(21, 400, if (focused) Sub else Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(title, style = text(Type.LARGE, if (focused) 600 else 500, fg), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (sub != null) BasicText(sub, style = text(Type.CAPTION, 400, if (focused) Colors.OnFocusMuted else Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (checked) Ico(Icons.Check, 28.u, fg)
     }
@@ -387,7 +403,7 @@ private fun SubsMenu(c: PlayerControls) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.u)) {
                     Row(Modifier.padding(start = 22.u, top = 8.u, bottom = 10.u), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.u)) {
                         Box(Modifier.size(14.u).clip(CircleShape).background(if (col == 0) EnColor else Colors.Fg))
-                        BasicText(if (col == 0) "Верхняя строка" else "Нижняя строка", style = text(24, 600))
+                        BasicText(if (col == 0) "Верхняя строка" else "Нижняя строка", style = text(Type.SMALL, 600))
                     }
                     for (r in first until (first + ROWS).coerceAtMost(rows)) {
                         val focused = !c.onSize && c.subsCol == col && c.subsRow == r
@@ -398,19 +414,19 @@ private fun SubsMenu(c: PlayerControls) {
                 }
             }
         }
-        if (c.texts.isEmpty()) BasicText("В файле нет текстовых субтитров", Modifier.padding(start = 22.u, top = 4.u), style = text(22, 400, Colors.Muted))
-        Box(Modifier.padding(horizontal = 22.u, vertical = 8.u).fillMaxWidth().height(2.u).background(Color(0x14FFFFFF)))
+        if (c.texts.isEmpty()) BasicText("В файле нет текстовых субтитров", Modifier.padding(start = 22.u, top = 4.u), style = text(Type.CAPTION, 400, Colors.Muted))
+        Box(Modifier.padding(horizontal = 22.u, vertical = 8.u).fillMaxWidth().height(2.u).background(Colors.Pale))
         val size = PlayerPrefs.SIZES[PlayerPrefs.subsSize].second
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(20.u)).then(if (c.onSize) Modifier.background(Colors.Focus) else Modifier)
+            Modifier.fillMaxWidth().clip(Shapes.card).then(if (c.onSize) Modifier.background(Colors.Focus) else Modifier)
                 .padding(horizontal = 22.u, vertical = 10.u),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.u),
         ) {
             val fg = if (c.onSize) Colors.FocusFg else Colors.Fg
-            BasicText("Размер", Modifier.weight(1f), style = text(28, 500, fg))
+            BasicText("Размер", Modifier.weight(1f), style = text(Type.LARGE, 500, fg))
             Ico(Icons.Left, 28.u, fg)
-            BasicText(size, Modifier.width(170.u), style = text(28, 500, fg).copy(textAlign = TextAlign.Center))
+            BasicText(size, Modifier.width(170.u), style = text(Type.LARGE, 500, fg).copy(textAlign = TextAlign.Center))
             Ico(Icons.Right, 28.u, fg)
         }
     }
@@ -423,23 +439,23 @@ private const val ROWS = 6
 @Composable
 private fun EpisodesOverlay(c: PlayerControls) {
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(760.u)
-                .background(Brush.verticalGradient(0f to Color(0x00050608), 0.45f to Color(0xD9050608), 1f to Color(0xF5050608))),
-        )
-        BasicText(c.playback.title, Modifier.padding(start = 96.u, top = 72.u), style = text(64, 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(Modifier.padding(start = 96.u, top = 470.u), horizontalArrangement = Arrangement.spacedBy(48.u)) {
+        BakedGradient(listOf(0f to Color(0x00050608), 0.45f to Color(0xD9050608), 1f to Color(0xF5050608)),
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().height(760.u), vertical = true)
+        BasicText(c.playback.title, Modifier.padding(start = 96.u, top = 72.u), style = text(Type.DISPLAY, 700), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // The tabs' text sits on the margin; the focused pill's padding reaches into it.
+        Row(Modifier.padding(start = 76.u, top = 470.u), horizontalArrangement = Arrangement.spacedBy(8.u)) {
             c.seasons.forEachIndexed { i, s ->
                 val sel = i == c.epSeason
                 val focused = sel && c.epOnTabs
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.u)) {
                     BasicText(
                         "Сезон $s",
-                        Modifier.clip(RoundedCornerShape(24.u)).then(if (focused) Modifier.background(Colors.Focus) else Modifier)
-                            .padding(horizontal = if (focused) 20.u else 0.u, vertical = if (focused) 6.u else 0.u),
-                        style = text(30, if (sel) 600 else 500, if (focused) Colors.FocusFg else if (sel) Colors.Fg else Colors.Muted),
+                        // Constant padding: only the fill changes, so the tabs beside it do not jump.
+                        Modifier.clip(Shapes.pill).then(if (focused) Modifier.background(Colors.Focus) else Modifier)
+                            .padding(horizontal = 20.u, vertical = 6.u),
+                        style = text(Type.LARGE, if (sel) 600 else 500, if (focused) Colors.FocusFg else if (sel) Colors.Fg else Colors.Muted),
                     )
-                    if (sel && !focused) Box(Modifier.size(22.u, 4.u).clip(RoundedCornerShape(2.u)).background(Colors.Fg))
+                    if (sel && !focused) Box(Modifier.size(22.u, 4.u).clip(Shapes.pill).background(Colors.Fg))
                 }
             }
         }
@@ -450,8 +466,15 @@ private fun EpisodesOverlay(c: PlayerControls) {
                 .graphicsLayer { translationX = -scroll * LocalScaleHolder.px },
             horizontalArrangement = Arrangement.spacedBy(32.u),
         ) {
-            list.forEachIndexed { k, (i, item) ->
-                EpisodeCard(item, now = i == c.index, focused = !c.epOnTabs && k == c.epIdx, progress = c.playback.progress(i))
+            // Only the cards near the focus are composed: a season can hold two dozen stills.
+            val first = (c.epIdx - 5).coerceAtLeast(0)
+            val last = (c.epIdx + 6).coerceAtMost(list.lastIndex)
+            if (first > 0) Spacer(Modifier.width((first * 432 - 32).u))
+            for (k in first..last) {
+                val (i, item) = list[k]
+                androidx.compose.runtime.key(i) {
+                    EpisodeCard(item, now = i == c.index, focused = !c.epOnTabs && k == c.epIdx, progress = c.playback.progress(i))
+                }
             }
         }
     }
@@ -459,27 +482,27 @@ private fun EpisodesOverlay(c: PlayerControls) {
 
 @Composable
 private fun EpisodeCard(item: Playback.Item, now: Boolean, focused: Boolean, progress: Float) {
-    val sc by animateFloatAsState(if (focused) 1.05f else 1f, label = "ep")
+    val sc by animateFloatAsState(if (focused) FocusSpec.TILE else 1f, label = "ep")
     Column(Modifier.width(400.u), verticalArrangement = Arrangement.spacedBy(14.u)) {
         Box(
             Modifier.size(400.u, 225.u).graphicsLayer { scaleX = sc; scaleY = sc }
-                .then(if (focused) Modifier.border(5.u, Colors.Fg, RoundedCornerShape(18.u)) else Modifier)
-                .clip(RoundedCornerShape(18.u)).background(Color(0xFF1A1C21)),
+                .then(if (focused) Modifier.border(FocusSpec.RING.u, Colors.FocusRing, Shapes.card) else Modifier)
+                .clip(Shapes.card).background(Colors.Placeholder),
         ) {
             if (item.still != null) AsyncImage(item.still, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            else BasicText("${item.episode}", Modifier.align(Alignment.Center), style = text(72, 300, Colors.Faint))
+            else BasicText("${item.episode}", Modifier.align(Alignment.Center), style = text(Type.NUMERAL, 300, Colors.Faint))
             if (now) BasicText(
                 "Сейчас",
-                Modifier.padding(14.u).clip(RoundedCornerShape(8.u)).background(Color(0xF0F4F5F7)).padding(horizontal = 12.u, vertical = 4.u),
-                style = text(20, 600, Colors.FocusFg),
+                Modifier.padding(14.u).clip(Shapes.small).background(Color(0xF0F4F5F7)).padding(horizontal = 12.u, vertical = 4.u),
+                style = text(Type.CAPTION, 600, Colors.FocusFg),
             )
-            if (progress > 0f) Box(Modifier.align(Alignment.BottomStart).padding(14.u).fillMaxWidth().height(6.u).clip(RoundedCornerShape(3.u)).background(Color(0x4DFFFFFF))) {
+            if (progress > 0f) Box(Modifier.align(Alignment.BottomStart).padding(14.u).fillMaxWidth().height(6.u).clip(Shapes.pill).background(Color(0x4DFFFFFF))) {
                 Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(6.u).background(Colors.Fg))
             }
         }
-        BasicText("Серия ${item.episode}", style = text(26, if (focused) 600 else 500))
+        BasicText("Серия ${item.episode}", style = text(Type.BODY, if (focused) 600 else 500))
         val sub = item.name ?: item.runtimeMin.takeIf { it > 0 }?.let { "$it мин" }
-        if (sub != null) BasicText(sub, Modifier.offset(y = (-8).u), style = text(22, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (sub != null) BasicText(sub, Modifier.offset(y = (-8).u), style = text(Type.CAPTION, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -491,20 +514,20 @@ private fun SkipPrompt(c: PlayerControls, s: PlayerControls.Skip) {
     val intro = s.kind == PlayerControls.Kind.INTRO
     Box(Modifier.fillMaxSize()) {
         // Centred on the corner: the box must reach as far as the radius, or its edge shows.
-        Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color(0xB3050608), Color(0x00050608)), center = Offset.Infinite, radius = 900f * LocalScaleHolder.px)))
+        CornerShade(Color(0xB3050608), 900f)
         val mod = Modifier.align(Alignment.BottomEnd).padding(end = 96.u, bottom = 120.u)
         if (s.auto) Row(
-            mod.shadow(24.u, RoundedCornerShape(50.u)).clip(RoundedCornerShape(50.u)).background(Card).padding(start = 34.u, top = 10.u, end = 10.u, bottom = 10.u),
+            mod.shadow(24.u, Shapes.pill).clip(Shapes.pill).background(Colors.Surface).padding(start = 34.u, top = 10.u, end = 10.u, bottom = 10.u),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(24.u),
         ) {
-            BasicText(if (intro) "Заставка пропущена" else "Пересказ пропущен", style = text(28, 500))
+            BasicText(if (intro) "Заставка пропущена" else "Пересказ пропущен", style = text(Type.LARGE, 500))
             FillButton(Icons.Undo, "Вернуться", 1f, focused = true)
         }
         else {
             val span = (s.range.last - s.range.first).coerceAtLeast(1)
             val fill = ((c.position - s.range.first).toFloat() / span).coerceIn(0f, 1f)
-            Box(mod.shadow(24.u, RoundedCornerShape(40.u))) {
+            Box(mod.shadow(24.u, Shapes.pill)) {
                 FillButton(Icons.SkipAhead, if (intro) "Пропустить заставку" else "Пропустить пересказ", fill, focused = true)
             }
         }
@@ -514,19 +537,19 @@ private fun SkipPrompt(c: PlayerControls, s: PlayerControls.Skip) {
 /** A pill whose lighter part grows with [fill]: how far the intro or the countdown has got. */
 @Composable
 private fun FillButton(icon: ImageVector?, label: String, fill: Float, focused: Boolean) {
-    val f by animateFloatAsState(fill, tween(260, easing = LinearEasing), label = "fill")
+    val f = animateFloatAsState(fill, tween(260, easing = LinearEasing), label = "fill")
     val fg = if (focused) Colors.FocusFg else Colors.Fg
-    Box(Modifier.height(76.u).clip(RoundedCornerShape(38.u)).background(if (focused) Color(0xFFDADDE3) else Pale)) {
-        Box(Modifier.matchParentSize()) {
-            Box(Modifier.fillMaxHeight().fillMaxWidth(f).background(if (focused) Color.White else Color(0x24FFFFFF)))
-        }
+    val done = if (focused) Colors.Focus else Colors.PaleStrong
+    // The filled part is drawn, not laid out: growing every frame, it must not measure the button again.
+    Box(Modifier.height(76.u).clip(Shapes.pill).background(if (focused) Color(0xFFDADDE3) else Colors.Pale)) {
+        Box(Modifier.matchParentSize().drawBehind { drawRect(done, size = Size(size.width * f.value, size.height)) })
         Row(
             Modifier.padding(start = if (icon != null) 30.u else 36.u, end = 36.u).height(76.u),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.u),
         ) {
             icon?.let { Ico(it, 30.u, fg) }
-            BasicText(label, style = text(30, 600, fg))
+            BasicText(label, style = text(Type.LARGE, 600, fg))
         }
     }
 }
@@ -535,22 +558,22 @@ private fun FillButton(icon: ImageVector?, label: String, fill: Float, focused: 
 private fun NextCard(c: PlayerControls) {
     val next = c.playback.items.getOrNull(c.index + 1) ?: return
     Box(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(Color(0xCC050608), Color(0x00050608)), center = Offset.Infinite, radius = 1100f * LocalScaleHolder.px)))
+        CornerShade(Color(0xCC050608), 1100f)
         Column(
             Modifier.align(Alignment.BottomEnd).padding(end = 96.u, bottom = 96.u).width(780.u)
-                .shadow(40.u, RoundedCornerShape(32.u)).clip(RoundedCornerShape(32.u)).background(Card).padding(28.u),
+                .shadow(20.u, Shapes.menu).clip(Shapes.menu).background(Colors.Surface).padding(28.u),
             verticalArrangement = Arrangement.spacedBy(28.u),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(28.u)) {
-                Box(Modifier.size(272.u, 153.u).clip(RoundedCornerShape(16.u)).background(Color(0xFF1A1C21))) {
+                Box(Modifier.size(272.u, 153.u).clip(Shapes.card).background(Colors.Placeholder)) {
                     if (next.still != null) AsyncImage(next.still, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                    else BasicText("${next.episode}", Modifier.align(Alignment.Center), style = text(56, 300, Colors.Faint))
+                    else BasicText("${next.episode}", Modifier.align(Alignment.Center), style = text(Type.NUMERAL, 300, Colors.Faint))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(6.u)) {
-                    BasicText("Следующая серия", style = text(24, 500, Colors.Muted))
-                    BasicText("Серия ${next.episode}", style = text(40, 600))
-                    val meta = listOfNotNull(next.name, next.runtimeMin.takeIf { it > 0 }?.let { "$it мин" }).joinToString(" · ")
-                    if (meta.isNotEmpty()) BasicText(meta, style = text(24, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    BasicText("Следующая серия", style = text(Type.SMALL, 500, Colors.Muted))
+                    BasicText("Серия ${next.episode}", style = text(Type.TITLE, 600))
+                    val meta = listOfNotNull(next.name, next.runtimeMin.takeIf { it > 0 }?.let { "$it мин" }).joinToString(", ")
+                    if (meta.isNotEmpty()) BasicText(meta, style = text(Type.SMALL, 400, Colors.Muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(16.u)) {
@@ -580,9 +603,9 @@ private fun Toast(label: String) {
     Box(Modifier.fillMaxSize()) {
         BasicText(
             label,
-            Modifier.align(Alignment.TopCenter).padding(top = 72.u).shadow(24.u, RoundedCornerShape(30.u)).clip(RoundedCornerShape(30.u))
-                .background(Card).padding(horizontal = 32.u, vertical = 16.u),
-            style = text(28, 500),
+            Modifier.align(Alignment.TopCenter).padding(top = 72.u).shadow(24.u, Shapes.menu).clip(Shapes.menu)
+                .background(Colors.Surface).padding(horizontal = 32.u, vertical = 16.u),
+            style = text(Type.LARGE, 500),
         )
     }
 }

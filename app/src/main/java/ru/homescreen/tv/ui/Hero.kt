@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -48,7 +47,17 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.Canvas
+import android.graphics.Bitmap
+import android.graphics.drawable.BitmapDrawable
+import coil.request.ImageRequest
 import androidx.compose.ui.unit.em
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -79,12 +88,18 @@ fun logoSize(name: String, base: Float): Float {
 fun LogoTitle(name: String, logo: String?, base: Float, maxW: Int = 980, maxH: Int = 170) {
     var failed by remember(logo) { mutableStateOf(false) }
     if (logo != null && !failed) {
+        val ctx = LocalContext.current
+        // Software bitmap: its pixels are read once to tell a dark logo, which is then drawn white (alpha kept).
+        val request = remember(logo) { ImageRequest.Builder(ctx).data(logo).allowHardware(false).build() }
+        var dark by remember(logo) { mutableStateOf(LogoTone.known[logo] ?: false) }
         AsyncImage(
-            model = logo,
+            model = request,
             contentDescription = name,
             contentScale = ContentScale.Fit,
             alignment = Alignment.CenterStart,
+            colorFilter = if (dark) LogoTone.White else null,
             onError = { failed = true },
+            onSuccess = { st -> dark = LogoTone.isDark(logo, (st.result.drawable as? BitmapDrawable)?.bitmap) },
             modifier = Modifier.widthIn(max = (maxW * 0.72f).u).heightIn(max = maxH.u).height(maxH.u),
         )
     } else {
@@ -94,20 +109,20 @@ fun LogoTitle(name: String, logo: String?, base: Float, maxW: Int = 980, maxH: I
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.widthIn(max = maxW.u),
             style = text(logoSize(name, base), 900).merge(
-                TextStyle(letterSpacing = 0.04.em, lineHeight = 0.92.em, shadow = Shadow(Color(0x8C000000), blurRadius = 6f)),
+                TextStyle(letterSpacing = 0.04.em, lineHeight = 0.92.em, shadow = Shadow(Colors.Shade, blurRadius = 6f)),
             ),
         )
     }
 }
 
 @Composable
-fun MetaLine(d: HeroData, size: Int = 25) {
+fun MetaLine(d: HeroData, size: Int = Type.SMALL) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.u)) {
         if (d.vote > 0) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.u)) {
             Ico(Icons.Star, 30.u, Colors.Gold)
             BasicText("%.1f".format(d.vote), style = text(size, 700))
         }
-        for (m in d.meta) BasicText(m, style = text(size, 400, Colors.Muted).merge(TextStyle(shadow = Shadow(Color(0x99000000), blurRadius = 6f))))
+        for (m in d.meta) BasicText(m, style = text(size, 400, Colors.Muted).merge(TextStyle(shadow = Shadow(Colors.Shade, blurRadius = 6f))))
         d.age?.takeIf { it.isNotEmpty() }?.let { Chip(it, accent = null) }
         d.chip?.let { Chip(it, accent = Colors.Fg) }
     }
@@ -115,13 +130,12 @@ fun MetaLine(d: HeroData, size: Int = 25) {
 
 @Composable
 fun Chip(label: String, accent: Color?) {
-    val shape = RoundedCornerShape(10.u)
+    // Flat: a plain fill, no gradient and no outline.
     Box(
-        Modifier.clip(shape)
-            .background(if (accent != null) Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF))) else Brush.verticalGradient(listOf(Color(0x33FFFFFF), Color(0x0FFFFFFF))))
-            .border(1.dp, Color(0x24FFFFFF), shape)
+        Modifier.clip(Shapes.small)
+            .background(if (accent != null) Colors.PaleStrong else Colors.Pale)
             .padding(horizontal = 13.u, vertical = 4.u),
-    ) { BasicText(label, style = text(20, 600)) }
+    ) { BasicText(label, style = text(Type.CAPTION, 600)) }
 }
 
 /**
@@ -182,7 +196,7 @@ fun Hero(d: HeroData?, rowsMode: Boolean, trailer: Boolean, focused: Boolean, sl
                 BasicText(
                     h.overview, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.widthIn(max = 840.u).graphicsLayer { alpha = textA.value },
-                    style = text(25, 400, Color(0xDBF0F2F6)).merge(TextStyle(lineHeight = 1.45.em, shadow = Shadow(Color(0xBF000000), blurRadius = 6f))),
+                    style = text(Type.SMALL, 400, Colors.Body).merge(TextStyle(lineHeight = 1.45.em, shadow = Shadow(Color(0xBF000000), blurRadius = 6f))),
                 )
                 Spacer(Modifier.height(36.u))
                 if (buttons) Row(
@@ -199,32 +213,66 @@ fun Hero(d: HeroData?, rowsMode: Boolean, trailer: Boolean, focused: Boolean, sl
     }
 }
 
-/** Text with an icon; only the focused button becomes a solid white pill. */
+/** Text with an icon; only the focused button becomes a solid white pill, at once (only the size springs). */
 @Composable
 fun PillButton(icon: ImageVector, label: String, focused: Boolean) {
-    val sc by animateFloatAsState(if (focused) 1.08f else 1f, spring(0.5f, Spring.StiffnessMedium), label = "pb")
-    val bg by androidx.compose.animation.animateColorAsState(if (focused) Color.White else Color.Transparent, tween(180), label = "pbg")
-    // Same fade as the pill, or the label turns white while the pill is still white.
-    val fg by androidx.compose.animation.animateColorAsState(if (focused) Colors.FocusFg else Colors.Fg, tween(180), label = "pfg")
-    val shape = RoundedCornerShape(38.u)
+    val sc by animateFloatAsState(if (focused) FocusSpec.CONTROL else 1f, spring(0.5f, Spring.StiffnessMedium), label = "pb")
+    val fg = if (focused) Colors.FocusFg else Colors.Fg
     Row(
         Modifier.graphicsLayer { scaleX = sc; scaleY = sc }
-            .height(76.u).clip(shape).background(bg)
+            .height(76.u).clip(Shapes.pill).background(if (focused) Colors.Focus else Color.Transparent)
             .padding(horizontal = 34.u),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.u),
     ) {
         Ico(icon, 30.u, fg)
-        BasicText(label, style = text(27, 600, fg).merge(TextStyle(shadow = if (focused) null else Shadow(Color(0x99000000), blurRadius = 6f))))
+        BasicText(label, style = text(Type.BODY, 600, fg).merge(TextStyle(shadow = if (focused) null else Shadow(Colors.Shade, blurRadius = 6f))))
     }
 }
 
+/** The carousel's dots, drawn in one pass: the long one slides along at draw time, nothing is laid out again. */
 @Composable
 private fun Dots(n: Int, on: Int) {
-    Row(Modifier.padding(start = 26.u), horizontalArrangement = Arrangement.spacedBy(10.u)) {
+    val pos = animateFloatAsState(on.toFloat(), tween(400), label = "dot")
+    Canvas(Modifier.padding(start = 26.u).size(((n - 1) * 20 + 34).u, 10.u)) {
+        val unit = size.height / 10f
+        var x = 0f
         for (i in 0 until n) {
-            val w by animateDpAsState(if (i == on) 34.u else 10.u, tween(400), label = "dot")
-            Box(Modifier.size(w, 10.u).clip(RoundedCornerShape(5.u)).background(if (i == on) Color.White else Color(0x59FFFFFF)))
+            val k = (1f - kotlin.math.abs(i - pos.value)).coerceIn(0f, 1f)
+            val w = (10f + 24f * k) * unit
+            drawRoundRect(lerp(Color(0x59FFFFFF), Color.White, k), Offset(x, 0f), Size(w, size.height), CornerRadius(size.height / 2))
+            x += w + 10f * unit
         }
+    }
+}
+
+/** Logos that are dark on dark: drawn white. The verdict is kept per URL, so a logo is sampled once. */
+object LogoTone {
+    val known = HashMap<String, Boolean>()
+    val White = ColorFilter.tint(Color.White, BlendMode.SrcIn)
+
+    fun isDark(url: String, bmp: Bitmap?): Boolean {
+        known[url]?.let { return it }
+        if (bmp == null || bmp.config == Bitmap.Config.HARDWARE) return false
+        var sum = 0.0
+        var n = 0
+        val sx = (bmp.width / 32).coerceAtLeast(1)
+        val sy = (bmp.height / 12).coerceAtLeast(1)
+        var y = 0
+        while (y < bmp.height) {
+            var x = 0
+            while (x < bmp.width) {
+                val p = bmp.getPixel(x, y)
+                if ((p ushr 24) > 128) {
+                    sum += (0.2126 * ((p shr 16) and 255) + 0.7152 * ((p shr 8) and 255) + 0.0722 * (p and 255)) / 255.0
+                    n++
+                }
+                x += sx
+            }
+            y += sy
+        }
+        val dark = n > 8 && sum / n < 0.22
+        known[url] = dark
+        return dark
     }
 }

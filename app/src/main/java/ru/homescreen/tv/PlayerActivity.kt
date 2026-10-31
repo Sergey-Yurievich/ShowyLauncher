@@ -100,7 +100,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         controls = PlayerControls(this, playback)
         // Files left by a player the system killed.
-        File(cacheDir, "video").deleteRecursively()
+        lifecycleScope.launch(Dispatchers.IO) { Prefetch.sweep(File(cacheDir, "video")) }
 
         val renderers = object : DefaultRenderersFactory(this) {
             override fun buildTextRenderers(
@@ -148,6 +148,9 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
             override fun onTracksChanged(tracks: Tracks) {
                 keepVoice()
                 val groups = audioGroups()
+                groups.forEach { g -> g.getTrackFormat(0).let { f ->
+                    Log.i("homescreen", "player: audio id=${f.id} lang=${f.language} label=${f.label} labels=${f.labels.map { it.value }} ${f.sampleMimeType} ${f.channelCount}ch roles=${f.roleFlags}")
+                } }
                 controls.audio = groups.mapIndexed { i, g -> describeAudio(g.getTrackFormat(0), i) }
                 controls.audioSelected = groups.indexOfFirst { it.isSelected }
                 controls.badges = badges()
@@ -217,12 +220,22 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
             // The last file's track means nothing in this one: [keepVoice] picks the voice again once the tracks are known.
             player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_AUDIO).build()
             val old = prefetch
-            val (hls, subs, disk) = coroutineScope {
-                val h = async { isHls(o.url, o.headers) }
-                val t = async { sideload(o.subtitles) }
-                // Asked alongside: a torrent's first answer can take seconds.
-                val d = async(Dispatchers.IO) { if (h.await()) null else Prefetch.open(File(cacheDir, "video/${SystemClock.uptimeMillis()}"), o.url, o.headers) }
-                Triple(h.await(), t.await(), d.await())
+            var opening: Prefetch? = null
+            val (hls, subs, disk) = try {
+                coroutineScope {
+                    val h = async { isHls(o.url, o.headers) }
+                    val t = async { sideload(o.subtitles) }
+                    // Asked alongside: a torrent's first answer can take seconds.
+                    val d = async(Dispatchers.IO) {
+                        if (h.await()) null
+                        else Prefetch.open(File(cacheDir, "video/${SystemClock.uptimeMillis()}"), o.url, o.headers).also { opening = it }
+                    }
+                    Triple(h.await(), t.await(), d.await())
+                }
+            } catch (e: Throwable) {
+                // Another episode, or the player left, while the server answered: nothing will play this file.
+                opening?.close()
+                throw e
             }
             prefetch = disk
             val item = MediaItem.Builder().setUri(o.url).setSubtitleConfigurations(subs)
@@ -310,7 +323,15 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     override val position: Long get() = player.currentPosition
     override val duration: Long get() = player.duration.takeIf { it > 0 } ?: 0L
     override val buffered: Long get() = player.bufferedPosition
-    override val loaded: Float? get() = prefetch?.loaded
+    override val loadedTo: Long?
+        get() {
+            val p = prefetch ?: return null
+            val d = duration.takeIf { it > 0 } ?: return null
+            // Bytes to time as if the bitrate were even: close enough for "how many minutes are safe".
+            val at = (p.length * (position.toDouble() / d)).toLong().coerceIn(0L, p.length)
+            val end = p.downFrom(at)
+            return if (end >= p.length) d else (d * (end.toDouble() / p.length)).toLong()
+        }
     override val speed: Long get() = prefetch?.speed ?: 0L
     override val playing: Boolean get() = player.playWhenReady
 
@@ -408,7 +429,7 @@ class PlayerActivity : ComponentActivity(), PlayerControls.Host {
     private fun describeAudio(f: Format, i: Int): PlayerControls.Track {
         val lang = languageName(f.language)
         val label = f.label?.trim()?.takeIf { it.isNotEmpty() && !namesLanguage(it, f.language) }
-        return PlayerControls.Track("$i", lang ?: label ?: "Дорожка ${i + 1}", listOfNotNull(label.takeIf { lang != null }, codec(f)).joinToString(" · "))
+        return PlayerControls.Track("$i", lang ?: label ?: "Дорожка ${i + 1}", listOfNotNull(label.takeIf { lang != null }, codec(f)).joinToString(", "))
     }
 
     /** Short facts for the panel's corner: 4K, Dolby Vision or HDR10, 5.1. */

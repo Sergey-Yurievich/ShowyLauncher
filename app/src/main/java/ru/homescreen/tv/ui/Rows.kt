@@ -178,7 +178,7 @@ private fun RowView(
             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(Geo.LEFT / 1920f, 0f)
         },
     ) {
-        BasicText(row.title, modifier = Modifier.offset(x = Geo.LEFT.u), style = text(27, 600, Color(0xEBECEFF5)))
+        BasicText(row.title, modifier = Modifier.offset(x = Geo.LEFT.u), style = text(Type.BODY, 600, Colors.Title))
         val w = Geo.w(row.kind)
         val h = Geo.h(row.kind)
         if (row.kind == RowKind.APP_GRID) {
@@ -226,13 +226,13 @@ private fun TileView(
     val f = animateFloatAsState(if (focused) 1f else 0f, spring(0.6f, Spring.StiffnessMediumLow), label = "tf")
     val shine = remember { Animatable(0f) }
     LaunchedEffect(focused) { if (focused) { shine.snapTo(0f); shine.animateTo(1f, tween(800)) } }
-    val shape = RoundedCornerShape(18.u)
+    val shape = Shapes.card
 
     Box(
         Modifier.size(w.u, h.u).zIndex(if (focused) 2f else 0f)
             .graphicsLayer {
                 val p = f.value
-                val s = 1f + 0.12f * p
+                val s = 1f + (FocusSpec.TILE - 1f) * p
                 scaleX = s; scaleY = s
                 rotationX = if (focused) nav.kickX.value else 0f
                 rotationY = if (focused) nav.kickY.value else 0f
@@ -244,7 +244,7 @@ private fun TileView(
                 this.shape = shape
                 clip = true
             }
-            .background(Color(0xFF15171C)),
+            .background(Colors.Placeholder),
     ) {
         when (tile) {
             is TitleTile -> PosterContent(tile, vm)
@@ -255,7 +255,7 @@ private fun TileView(
             is MoreTile -> MoreContent()
         }
         // An app being moved («Переместить»): arrows on its sides until OK.
-        if (focused && tile is AppTile && tile.app.pkg == nav.moving) Box(Modifier.fillMaxSize().background(Color(0x8C000000))) {
+        if (focused && tile is AppTile && tile.app.pkg == nav.moving) Box(Modifier.fillMaxSize().background(Colors.Shade)) {
             Ico(Icons.Left, 44.u, Color.White, Modifier.align(Alignment.CenterStart).padding(start = 10.u))
             Ico(Icons.Right, 44.u, Color.White, Modifier.align(Alignment.CenterEnd).padding(end = 10.u))
         }
@@ -267,7 +267,7 @@ private fun TileView(
                 drawRect(Brush.linearGradient(listOf(Color.Transparent, Color(0x48FFFFFF), Color.Transparent),
                     Offset(x, 0f), Offset(x + size.width * 0.4f, size.height * 0.25f)), blendMode = BlendMode.Plus)
             }
-        }.border(3.u, Color(0xE6FFFFFF), shape))
+        }.border(FocusSpec.RING.u, Colors.FocusRing, shape))
     }
 }
 
@@ -281,38 +281,37 @@ private fun BoxScope.PosterContent(t: TitleTile, vm: HomeViewModel) {
 @Composable
 fun BoxScope.NewEpisodeBadge(label: String) {
     Box(
-        Modifier.align(Alignment.TopStart).padding(10.u).clip(RoundedCornerShape(9.u)).background(Color(0xF2FFFFFF))
+        Modifier.align(Alignment.TopStart).padding(10.u).clip(Shapes.small).background(Colors.Focus)
             .padding(horizontal = 10.u, vertical = 5.u),
-    ) { BasicText(label, style = text(16, 700, Colors.FocusFg)) }
+    ) { BasicText(label, style = text(Type.CAPTION, 700, Colors.FocusFg)) }
 }
 
 @Composable
 private fun BoxScope.ContinueContent(t: ContinueTile, vm: HomeViewModel) {
     LaunchedEffect(t.key) { vm.requestDetails(t.title) }
     AsyncImage(Tmdb.img(vm.details[t.title.key]?.backdrop, "w780") ?: t.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0x99000000))))
-    Box(Modifier.align(Alignment.BottomStart).padding(start = 22.u, end = 22.u, bottom = 34.u)) {
-        LogoTitle(t.title.name, Tmdb.img(vm.details[t.title.key]?.logo, "w300"), 44f, maxW = 376, maxH = 70)
-    }
+    // No title on the picture: the hero above names the focused title, once.
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Colors.Shade)))
     // A new episode of the series beats the "which episode / time left" label.
     val fresh = vm.newEpisode(t.title)
     val label = fresh ?: t.label
     if (label.isNotEmpty()) Box(
-        Modifier.align(Alignment.TopEnd).padding(14.u).clip(RoundedCornerShape(9.u))
-            .background(if (fresh != null) Color(0xF2FFFFFF) else Color(0xB30E0F13)).padding(horizontal = 10.u, vertical = 5.u),
-    ) { BasicText(label, style = text(16, 700, if (fresh != null) Colors.FocusFg else Colors.Fg)) }
+        Modifier.align(Alignment.TopEnd).padding(14.u).clip(Shapes.small)
+            .background(if (fresh != null) Colors.Focus else Color(0xB30E0F13)).padding(horizontal = 10.u, vertical = 5.u),
+    ) { BasicText(label, style = text(Type.CAPTION, 700, if (fresh != null) Colors.FocusFg else Colors.Fg)) }
     if (t.progress > 0f) Box(
         Modifier.align(Alignment.BottomCenter).padding(start = 22.u, end = 22.u, bottom = 16.u).fillMaxWidth().height(6.u)
-            .clip(RoundedCornerShape(3.u)).background(Color(0x40FFFFFF)),
+            .clip(Shapes.pill).background(Color(0x40FFFFFF)),
     ) {
-        Box(Modifier.fillMaxWidth(t.progress).height(6.u).clip(RoundedCornerShape(3.u)).background(Color.White))
+        Box(Modifier.fillMaxWidth(t.progress).height(6.u).clip(Shapes.pill).background(Color.White))
     }
 }
 
 @Composable
 private fun BoxScope.CollectionContent(t: CollectionTile) {
     AsyncImage(Tmdb.img(t.cover, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(hsl(t.hue, 0.85f, 0.45f, 0.88f), hsl(t.hue + 40f, 0.8f, 0.25f, 0.6f), Color(0x33000000)))))
+    // Muted like the rest of the screen: the cover is the colour, the tint only ties the set together.
+    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(hsl(t.hue, 0.4f, 0.22f, 0.9f), hsl(t.hue + 30f, 0.35f, 0.12f, 0.65f), Color(0x33000000)))))
     Column(Modifier.align(Alignment.BottomStart).padding(start = 26.u, end = 26.u, bottom = 22.u)) {
         Ico(when (t.icon) {
             CollIcon.MOON -> Icons.Moon
@@ -323,8 +322,8 @@ private fun BoxScope.CollectionContent(t: CollectionTile) {
             CollIcon.STAR -> Icons.Star
         }, 42.u, Color.White)
         Spacer(Modifier.height(10.u))
-        BasicText(t.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = text(29, 800))
-        if (t.caption.isNotEmpty()) BasicText(t.caption, style = text(18, 400, Color(0xD9FFFFFF)))
+        BasicText(t.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = text(Type.LARGE, 800))
+        if (t.caption.isNotEmpty()) BasicText(t.caption, style = text(Type.CAPTION, 500, Colors.Fg).merge(androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Colors.Shade, blurRadius = 6f))))
     }
 }
 
@@ -334,8 +333,8 @@ private fun BoxScope.CollectionContent(t: CollectionTile) {
  */
 @Composable
 private fun BoxScope.GenreContent(t: GenreTile) {
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(hsl(t.hue, 0.7f, 0.38f), hsl(t.hue + 35f, 0.65f, 0.18f)))))
-    val posterShape = RoundedCornerShape(10.u)
+    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(hsl(t.hue, 0.38f, 0.26f), hsl(t.hue + 30f, 0.32f, 0.11f)))))
+    val posterShape = Shapes.small
     AsyncImage(
         Tmdb.img(t.poster, "w185"), null,
         Modifier.align(Alignment.CenterEnd).offset(x = 14.u, y = 18.u).size(118.u, 177.u)
@@ -343,7 +342,7 @@ private fun BoxScope.GenreContent(t: GenreTile) {
         contentScale = ContentScale.Crop,
     )
     BasicText(t.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.align(Alignment.CenterStart).padding(start = 24.u).width(190.u), style = text(27, 800))
+        modifier = Modifier.align(Alignment.CenterStart).padding(start = 24.u).width(190.u), style = text(Type.BODY, 800))
 }
 
 @Composable
@@ -355,16 +354,16 @@ private fun BoxScope.AppContent(t: AppTile) {
         Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF3A3E47), Color(0xFF17191E)))))
         Row(Modifier.align(Alignment.Center).padding(horizontal = 18.u), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.u)) {
             t.app.icon?.let { Image(it, null, Modifier.size(64.u)) }
-            BasicText(t.app.label, maxLines = 2, overflow = TextOverflow.Ellipsis, style = text(26, 700))
+            BasicText(t.app.label, maxLines = 2, overflow = TextOverflow.Ellipsis, style = text(Type.BODY, 700))
         }
     }
 }
 
 @Composable
 private fun BoxScope.MoreContent() {
-    Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0x33FFFFFF), Color(0x0FFFFFFF)))))
+    Box(Modifier.fillMaxSize().background(Colors.Pale))
     Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.u)) {
         Ico(Icons.Grid, 48.u, Color.White)
-        BasicText("Смотреть\nвсе", style = text(23, 600).merge(androidx.compose.ui.text.TextStyle(textAlign = androidx.compose.ui.text.style.TextAlign.Center)))
+        BasicText("Смотреть\nвсе", style = text(Type.SMALL, 600).merge(androidx.compose.ui.text.TextStyle(textAlign = androidx.compose.ui.text.style.TextAlign.Center)))
     }
 }

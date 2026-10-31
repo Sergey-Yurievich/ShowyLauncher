@@ -42,6 +42,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -66,8 +69,7 @@ import java.util.TimeZone
 fun Ico(v: ImageVector, size: Dp, tint: Color, modifier: Modifier = Modifier) =
     Image(v, null, modifier.size(size), colorFilter = ColorFilter.tint(tint))
 
-private val TextShadow = Shadow(Color(0x99000000), blurRadius = 6f)
-private val Dim = Color(0x99FFFFFF)
+private val TextShadow = Shadow(Colors.Shade, blurRadius = 6f)
 
 /**
  * Plain text over the picture: time and weather on the left, tabs in the middle, icons on the right. Focus is shown
@@ -85,15 +87,15 @@ fun TopBar(nav: Nav, weather: Weather?, place: Place, console: Pair<TvInput, Inp
         Widget(weather, place, Modifier.align(Alignment.CenterStart))
         Tabs(nav, active, Modifier.align(Alignment.Center))
         Row(Modifier.align(Alignment.CenterEnd), horizontalArrangement = Arrangement.spacedBy(14.u), verticalAlignment = Alignment.CenterVertically) {
-            IconItem(Icons.YouTube, "YouTube", active && nav.top == TopItem.YOUTUBE)
+            IconItem(Icons.YouTube, active && nav.top == TopItem.YOUTUBE)
             console?.let { (input, kind) ->
-                IconItem(if (kind == Inputs.Console.PLAYSTATION) Icons.PlayStation else Icons.Xbox, input.sub,
+                IconItem(if (kind == Inputs.Console.PLAYSTATION) Icons.PlayStation else Icons.Xbox,
                     active && nav.top == TopItem.CONSOLE, live = input.connected == true)
             }
-            IconItem(Icons.Inputs, "Входы", active && nav.top == TopItem.INPUTS)
+            IconItem(Icons.Inputs, active && nav.top == TopItem.INPUTS)
             // A newer version waits in the gear menu.
-            ru.homescreen.tv.Updater.available?.let { BasicText("Доступна ${it.version}", style = text(19, 500, Colors.Muted).merge(TextStyle(shadow = TextShadow))) }
-            IconItem(Icons.Settings, "Настройки", active && nav.top == TopItem.SETTINGS)
+            ru.homescreen.tv.Updater.available?.let { BasicText("Доступна ${it.version}", style = text(Type.CAPTION, 500, Colors.Muted).merge(TextStyle(shadow = TextShadow))) }
+            IconItem(Icons.Settings, active && nav.top == TopItem.SETTINGS)
         }
     }
 }
@@ -106,10 +108,12 @@ private fun Widget(weather: Weather?, place: Place, modifier: Modifier) {
     LaunchedEffect(Unit) { while (true) { delay(1000); colon = !colon; now = Date() } }
     // The clock keeps the time zone of where the network puts the TV: the TV's own may be an hour off.
     val zone = remember(place.zone) { place.zoneId?.let { TimeZone.getTimeZone(it) } ?: TimeZone.getDefault() }
-    val hm = SimpleDateFormat("HH:mm", Locale.getDefault()).apply { timeZone = zone }.format(now)
+    val hmFormat = remember(zone) { SimpleDateFormat("HH:mm", Locale.getDefault()).apply { timeZone = zone } }
+    val dateFormat = remember(zone) { SimpleDateFormat("EEEE, d MMMM", Locale("ru")).apply { timeZone = zone } }
+    val hm = hmFormat.format(now)
     Box(modifier) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(22.u)) {
-        val big = text(52, 300).merge(TextStyle(shadow = TextShadow))
+        val big = text(Type.CLOCK, 300).merge(TextStyle(shadow = TextShadow))
         Row(verticalAlignment = Alignment.CenterVertically) {
             BasicText(hm.substring(0, 2), style = big)
             BasicText(":", style = big, modifier = Modifier.graphicsLayer { alpha = if (colon) 1f else 0.3f })
@@ -118,17 +122,17 @@ private fun Widget(weather: Weather?, place: Place, modifier: Modifier) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.u)) {
                 WeatherIcon(weather, Modifier.size(34.u, 28.u))
-                BasicText(weather?.let { (if (it.temp > 0) "+" else "") + it.temp + "°" } ?: "", style = text(24, 500).merge(TextStyle(shadow = TextShadow)))
-                weather?.text?.takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(20, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow))) }
+                BasicText(weather?.let { (if (it.temp > 0) "+" else "") + it.temp + "°" } ?: "", style = text(Type.SMALL, 500).merge(TextStyle(shadow = TextShadow)))
+                weather?.text?.takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(Type.CAPTION, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow))) }
             }
-            val date = SimpleDateFormat("EEEE, d MMMM", Locale("ru")).apply { timeZone = zone }.format(now)
-            BasicText(date.replaceFirstChar { it.uppercase() }, style = text(20, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow)))
+            val date = dateFormat.format(now)
+            BasicText(date.replaceFirstChar { it.uppercase() }, style = text(Type.CAPTION, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow)))
         }
     }
     // The city under the clock and the weather, below the row's own height: the clock stays level with the tabs.
     // `hs_off city` hides it, for screenshots that should not tell where the TV is.
     if (place.city.isNotEmpty() && "city" !in DebugOff.set) BasicText(place.city, Modifier.align(Alignment.BottomStart).offset(y = 30.u),
-        style = text(20, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow)))
+        style = text(Type.CAPTION, 400, Colors.Muted).merge(TextStyle(shadow = TextShadow)))
     }
 }
 
@@ -159,38 +163,36 @@ private fun Tabs(nav: Nav, active: Boolean, modifier: Modifier) {
         for ((item, label) in items) {
             val focused = active && nav.top == item
             val current = nav.topIndexOf(nav.tab) == item
-            val color by animateColorAsState(if (focused || current) Color.White else Dim, tween(200), label = "tc")
-            val scale by animateFloatAsState(if (focused) 1.14f else 1f, spring(0.55f, Spring.StiffnessMedium), label = "tsc")
-            val line by animateDpAsState(if (focused) 28.u else if (current) 14.u else 0.u, spring(0.6f, Spring.StiffnessMediumLow), label = "tl")
+            // The colour changes at once; the size springs and the line grows at draw time, without a new layout.
+            val color = if (focused || current) Color.White else Colors.Dim
+            val scale by animateFloatAsState(if (focused) FocusSpec.CONTROL else 1f, spring(0.55f, Spring.StiffnessMedium), label = "tsc")
+            val line = animateFloatAsState(if (focused) 1f else if (current) 0.5f else 0f, spring(0.6f, Spring.StiffnessMediumLow), label = "tl")
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.graphicsLayer { scaleX = scale; scaleY = scale }) {
                 if (label.isEmpty()) Ico(if (item == TopItem.SEARCH) Icons.Search else Icons.Bookmark, 30.u, color, Modifier.padding(vertical = 2.u))
-                else BasicText(label, style = text(27, if (current || focused) 600 else 500, color).merge(TextStyle(shadow = TextShadow)))
+                else BasicText(label, style = text(Type.BODY, if (current || focused) 600 else 500, color).merge(TextStyle(shadow = TextShadow)))
                 Spacer(Modifier.height(8.u))
-                Box(Modifier.width(line).height(4.u).clip(RoundedCornerShape(2.u)).background(Color.White))
+                Box(Modifier.width(28.u).height(4.u).drawBehind {
+                    val w = size.width * line.value
+                    if (w > 0f) drawRoundRect(Color.White, Offset((size.width - w) / 2, 0f), Size(w, size.height), CornerRadius(size.height / 2))
+                })
             }
         }
     }
 }
 
+/** A round icon button; focused it turns white at once. No label: the icons say what they are. */
 @Composable
-private fun IconItem(icon: ImageVector, label: String, focused: Boolean, live: Boolean = false) {
-    val scale by animateFloatAsState(if (focused) 1.08f else 1f, spring(0.5f, Spring.StiffnessMedium), label = "ib")
-    val bg by animateColorAsState(if (focused) Color.White else Color.Transparent, tween(180), label = "ibg")
+private fun IconItem(icon: ImageVector, focused: Boolean, live: Boolean = false) {
+    val scale by animateFloatAsState(if (focused) FocusSpec.CONTROL else 1f, spring(0.5f, Spring.StiffnessMedium), label = "ib")
     val fg = if (focused) Colors.FocusFg else Color.White
-    Row(
+    Box(
         Modifier.graphicsLayer { scaleX = scale; scaleY = scale }
-            .height(64.u).clip(RoundedCornerShape(32.u)).background(bg).padding(horizontal = 17.u),
-        verticalAlignment = Alignment.CenterVertically,
+            .size(64.u).clip(Shapes.pill).background(if (focused) Colors.Focus else Color.Transparent),
+        contentAlignment = Alignment.Center,
     ) {
         Box(contentAlignment = Alignment.BottomEnd) {
             Ico(icon, 30.u, fg)
             if (live) LiveDot(focused)
-        }
-        AnimatedVisibility(focused, enter = expandHorizontally() + fadeIn(), exit = shrinkHorizontally() + fadeOut()) {
-            Row {
-                Spacer(Modifier.width(12.u))
-                BasicText(label, style = text(22, 600, fg))
-            }
         }
     }
 }
@@ -202,6 +204,6 @@ private fun LiveDot(focused: Boolean) {
     val p by inf.animateFloat(0.4f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "lp")
     Box(
         Modifier.offset(x = 4.u, y = 2.u).size(11.u).graphicsLayer { alpha = p }
-            .clip(RoundedCornerShape(6.u)).background(if (focused) Color(0xFF1F9E57) else Colors.Ok),
+            .clip(Shapes.pill).background(if (focused) Color(0xFF1F9E57) else Colors.Ok),
     )
 }

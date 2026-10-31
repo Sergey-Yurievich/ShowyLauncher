@@ -23,8 +23,11 @@ class PlayerControls(private val host: Host, val playback: Playback) {
         val position: Long
         val duration: Long
         val buffered: Long
-        /** The share of the file downloaded to disk, 0..1; null when it plays straight from the network. */
-        val loaded: Float?
+        /**
+         * How far the file is on disk without a gap from the current position, ms (the duration when it is down to the
+         * end); null when it plays straight from the network.
+         */
+        val loadedTo: Long?
         /** How fast that download goes, bits per second; 0 when it isn't running. */
         val speed: Long
         val playing: Boolean
@@ -63,7 +66,7 @@ class PlayerControls(private val host: Host, val playback: Playback) {
         private set
     var buffered by mutableLongStateOf(0L)
         private set
-    var loaded by mutableStateOf<Float?>(null)
+    var loadedTo by mutableStateOf<Long?>(null)
         private set
     var speed by mutableLongStateOf(0L)
         private set
@@ -183,7 +186,7 @@ class PlayerControls(private val host: Host, val playback: Playback) {
         position = host.position
         duration = host.duration
         buffered = host.buffered
-        loaded = host.loaded
+        loadedTo = host.loadedTo
         speed = host.speed
         playing = host.playing
         if (seekTarget != null && now >= seekApplyAt) applySeek(now)

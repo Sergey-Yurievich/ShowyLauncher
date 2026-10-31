@@ -64,27 +64,26 @@ import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
 import ru.homescreen.tv.data.TvInput
 
-/** Glass dropdown under the Входы button: HDMI ports with what is plugged in, then the tuner. */
+/** Opaque dropdown under the Входы button: HDMI ports with what is plugged in, then the tuner. */
 @Composable
 fun InputsMenu(visible: Boolean, inputs: List<TvInput>, focus: Int) {
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.7f, 0f)), exit = fadeOut(tween(150))) {
-        val shape = RoundedCornerShape(30.u)
+        val shape = Shapes.menu
         Box(Modifier.fillMaxSize()) {
             Column(
                 Modifier.offset(x = 1250.u, y = 140.u).width(480.u)
-                    .shadow(40.u, shape)
+                    .shadow(20.u, shape)
                     .clip(shape)
-                    .background(Color(0xF5181A1F))
+                    .background(Colors.Surface)
                     .padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
             ) {
-                if (inputs.isEmpty()) BasicText("Входы не найдены", modifier = Modifier.padding(20.u), style = text(24, 500, Colors.Muted))
+                if (inputs.isEmpty()) BasicText("Входы не найдены", modifier = Modifier.padding(20.u), style = text(Type.SMALL, 500, Colors.Muted))
                 inputs.forEachIndexed { i, input ->
                     val f = i == focus
                     val fg = if (f) Colors.FocusFg else Colors.Fg
-                    val sc by animateFloatAsState(if (f) 1.03f else 1f, label = "in")
                     Row(
-                        Modifier.graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(20.u))
+                        Modifier.fillMaxWidth().clip(Shapes.card)
                             .background(if (f) Color.White else Color.Transparent)
                             .padding(horizontal = 20.u, vertical = 16.u),
                         verticalAlignment = Alignment.CenterVertically,
@@ -92,14 +91,14 @@ fun InputsMenu(visible: Boolean, inputs: List<TvInput>, focus: Int) {
                     ) {
                         Ico(if (input.isTuner) Icons.Antenna else Icons.Inputs, 34.u, fg)
                         Column(Modifier.weight(1f)) {
-                            BasicText(input.label, style = text(24, 500, fg))
-                            BasicText(input.sub, style = text(19, 400, if (f) Color(0x990B0C0F) else Colors.Muted))
+                            BasicText(input.label, style = text(Type.SMALL, 500, fg))
+                            BasicText(input.sub, style = text(Type.CAPTION, 400, if (f) Colors.OnFocusMuted else Colors.Muted))
                         }
                         val dot = when (input.connected) {
                             true -> Colors.Ok
-                            else -> Color(0x33FFFFFF)
+                            else -> Colors.PaleStrong
                         }
-                        Box(Modifier.size(12.u).clip(RoundedCornerShape(6.u)).background(dot))
+                        Box(Modifier.size(12.u).clip(Shapes.pill).background(dot))
                     }
                 }
             }
@@ -132,14 +131,14 @@ fun SettingsMenu(
     checking: Boolean, pairing: Boolean, peers: List<String>, hidden: Int,
 ) {
     AnimatedVisibility(visible, enter = fadeIn(tween(200)) + scaleIn(tween(280), 0.96f, TransformOrigin(0.9f, 0f)), exit = fadeOut(tween(150))) {
-        val shape = RoundedCornerShape(30.u)
+        val shape = Shapes.menu
         Box(Modifier.fillMaxSize()) {
             // Linked TVs and hidden apps make it taller than the screen: it scrolls after the focus (see [MenuRow]).
             Column(
                 Modifier.offset(x = 1304.u, y = 140.u).width(520.u).heightIn(max = 900.u)
-                    .shadow(40.u, shape)
+                    .shadow(20.u, shape)
                     .clip(shape)
-                    .background(Color(0xF5181A1F))
+                    .background(Colors.Surface)
                     .verticalScroll(rememberScrollState())
                     .padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
@@ -198,10 +197,10 @@ fun SettingsMenu(
 @Composable
 fun ContextMenu(visible: Boolean, items: List<MenuItem>, focus: Int) {
     AnimatedVisibility(visible, enter = fadeIn(tween(160)) + scaleIn(tween(220), 0.96f), exit = fadeOut(tween(120))) {
-        val shape = RoundedCornerShape(30.u)
+        val shape = Shapes.menu
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
-                Modifier.width(600.u).shadow(40.u, shape).clip(shape).background(Color(0xF5181A1F)).padding(14.u),
+                Modifier.width(600.u).shadow(20.u, shape).clip(shape).background(Colors.Surface).padding(14.u),
                 verticalArrangement = Arrangement.spacedBy(6.u),
             ) {
                 items.forEachIndexed { i, item -> MenuRow(item.label, null, item.icon, i == focus, false) }
@@ -212,22 +211,21 @@ fun ContextMenu(visible: Boolean, items: List<MenuItem>, focus: Int) {
 
 @Composable
 private fun MenuHeader(label: String) {
-    BasicText(label, modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(19, 500, Colors.Muted))
+    BasicText(label, modifier = Modifier.padding(start = 20.u, top = 10.u, bottom = 4.u), style = text(Type.CAPTION, 500, Colors.Muted))
 }
 
 @Composable
 private fun MenuDivider() {
-    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Color(0x1FFFFFFF)))
+    Box(Modifier.padding(horizontal = 20.u, vertical = 6.u).fillMaxWidth().height(1.u).background(Colors.Hairline))
 }
 
 @Composable
 private fun MenuRow(label: String, sub: String?, icon: ImageVector?, focused: Boolean, checked: Boolean) {
     val fg = if (focused) Colors.FocusFg else Colors.Fg
-    val sc by animateFloatAsState(if (focused) 1.03f else 1f, label = "mr")
     val view = remember { BringIntoViewRequester() }
     LaunchedEffect(focused) { if (focused) view.bringIntoView() }
     Row(
-        Modifier.fillMaxWidth().bringIntoViewRequester(view).graphicsLayer { scaleX = sc; scaleY = sc }.clip(RoundedCornerShape(20.u))
+        Modifier.fillMaxWidth().bringIntoViewRequester(view).clip(Shapes.card)
             .background(if (focused) Color.White else Color.Transparent)
             .padding(horizontal = 20.u, vertical = 16.u),
         verticalAlignment = Alignment.CenterVertically,
@@ -235,8 +233,8 @@ private fun MenuRow(label: String, sub: String?, icon: ImageVector?, focused: Bo
     ) {
         icon?.let { Ico(it, 30.u, fg) }
         Column(Modifier.weight(1f)) {
-            BasicText(label, style = text(24, 500, fg))
-            sub?.let { BasicText(it, style = text(19, 400, if (focused) Color(0x990B0C0F) else Colors.Muted)) }
+            BasicText(label, style = text(Type.SMALL, 500, fg))
+            sub?.let { BasicText(it, style = text(Type.CAPTION, 400, if (focused) Colors.OnFocusMuted else Colors.Muted)) }
         }
         if (checked) Ico(Icons.Check, 28.u, fg)
     }
@@ -276,8 +274,9 @@ fun GridScreen(
     badge: (Title) -> String?,
 ) {
     AnimatedVisibility(visible, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
+        // Seven posters fill the width between the margins (as many as the remote moves by, see gridMove).
         val cols = 7
-        val rowH = 300f + 44f
+        val rowH = GRID_H + 44f
         val fr = focus / cols
         val y by animateFloatAsState(-((fr - 1).coerceAtLeast(0)) * rowH, tween(450, easing = FastOutSlowInEasing), label = "gy")
         // Opaque: the top bar and the hero behind would show through the header.
@@ -285,8 +284,8 @@ fun GridScreen(
             Row(Modifier.offset(x = 96.u, y = if (person != null) 50.u else 70.u),
                 verticalAlignment = if (person != null) Alignment.CenterVertically else Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(24.u)) {
                 person?.let { Avatar(it, 96f) }
-                BasicText(title, style = text(44, 800))
-                if (loading) BasicText("Загружаем ещё…", modifier = Modifier.padding(bottom = 6.u), style = text(22, 400, Colors.Muted))
+                BasicText(title, style = text(Type.HEADING, 800))
+                if (loading) BasicText("Загружаем ещё…", modifier = Modifier.padding(bottom = 6.u), style = text(Type.CAPTION, 400, Colors.Muted))
             }
             // Clipped below the title (the clip is outside the scroll): rows scrolled up must not run over it.
             Box(Modifier.fillMaxSize().padding(top = 150.u).clipToBounds().graphicsLayer { translationY = y * LocalScaleHolder.px }.padding(top = 30.u)) {
@@ -295,26 +294,45 @@ fun GridScreen(
                 items.chunked(cols).forEachIndexed { ri, line ->
                     if (ri in firstRow..lastRow) Row(
                         Modifier.offset(x = 96.u, y = (ri * rowH).u),
-                        horizontalArrangement = Arrangement.spacedBy(30.u),
+                        horizontalArrangement = Arrangement.spacedBy(GRID_GAP.u),
                     ) {
                         line.forEachIndexed { ci, t ->
-                            val f = ri * cols + ci == focus
-                            val sc by animateFloatAsState(if (f) 1.1f else 1f, label = "gs")
-                            val shape = RoundedCornerShape(18.u)
-                            Box(
-                                Modifier.size(200.u, 300.u).graphicsLayer { scaleX = sc; scaleY = sc }
-                                    .shadow(if (f) 30.u else 8.u, shape, ambientColor = if (f) accent.value else Color.Black, spotColor = if (f) accent.value else Color.Black)
-                                    .clip(shape).background(Color(0xFF15171C)),
-                            ) {
-                                AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                                badge(t)?.let { NewEpisodeBadge(it) }
-                                if (f) Box(Modifier.fillMaxSize().border(3.u, Color(0xE6FFFFFF), shape))
+                            androidx.compose.runtime.key(t.key) {
+                                FocusPoster(t, ri * cols + ci == focus, GRID_W, GRID_H, accent, badge)
                             }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+private const val GRID_W = 220f
+private const val GRID_H = 330f
+private const val GRID_GAP = 31f
+
+/**
+ * A poster in a grid or a row off Home: it grows and glows in the film's colour only while focused. Unfocused it has
+ * no shadow at all: a shadow on each of thirty posters cost the TV's GPU more than the pictures.
+ */
+@Composable
+fun FocusPoster(t: Title, focused: Boolean, w: Float, h: Float, accent: State<Color>, badge: (Title) -> String?) {
+    val p = animateFloatAsState(if (focused) 1f else 0f, tween(200), label = "fp")
+    val shape = Shapes.card
+    val px = LocalScaleHolder.px
+    Box(
+        Modifier.size(w.u, h.u).graphicsLayer {
+            val s = 1f + (FocusSpec.TILE - 1f) * p.value
+            scaleX = s; scaleY = s
+            shadowElevation = 30f * p.value * px
+            ambientShadowColor = accent.value; spotShadowColor = accent.value
+            this.shape = shape; clip = true
+        }.background(Colors.Placeholder),
+    ) {
+        AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        badge(t)?.let { NewEpisodeBadge(it) }
+        if (focused) Box(Modifier.fillMaxSize().border(FocusSpec.RING.u, Colors.FocusRing, shape))
     }
 }
 
@@ -325,8 +343,8 @@ fun Toast(nav: Nav) {
     }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
         AnimatedVisibility(nav.toast != null, enter = fadeIn() + slideInVertically { it / 2 }, exit = fadeOut() + slideOutVertically { it / 2 }) {
-            Box(Modifier.padding(bottom = 70.u).clip(RoundedCornerShape(34.u)).background(Color(0xF01A1C22)).padding(horizontal = 30.u, vertical = 18.u)) {
-                BasicText(nav.toast ?: "", style = text(24, 500))
+            Box(Modifier.padding(bottom = 70.u).clip(Shapes.pill).background(Colors.Surface).padding(horizontal = 30.u, vertical = 18.u)) {
+                BasicText(nav.toast ?: "", style = text(Type.SMALL, 500))
             }
         }
     }

@@ -30,4 +30,19 @@ class PrefetchRangesTest {
         assertEquals(50L, r.firstMissing(50))
         assertEquals(36L, r.readyAt(64))
     }
+
+    @Test
+    fun watchedChunksGoFirstThenTheFarthestAhead() {
+        assertEquals(2L, Prefetch.victim(listOf(5L, 2L, 3L, 9L, 300L), mine = 5, writing = 300))
+        assertEquals(9L, Prefetch.victim(listOf(5L, 6L, 9L, 300L), mine = 5, writing = 300))
+        assertEquals(null, Prefetch.victim(listOf(5L, 6L), mine = 5, writing = 6))
+    }
+
+    @Test
+    fun readsContentRange() {
+        assertEquals(100L to 1000L, Prefetch.contentRange("bytes 100-999/1000"))
+        assertEquals(0L to -1L, Prefetch.contentRange("bytes 0-0/*"))
+        assertEquals(null, Prefetch.contentRange("bytes */1000"))
+        assertEquals(null, Prefetch.contentRange(null))
+    }
 }

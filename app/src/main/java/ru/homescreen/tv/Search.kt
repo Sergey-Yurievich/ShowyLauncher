@@ -58,7 +58,9 @@ class SearchSession(
     val rows: List<List<Key>>
         get() = buildList {
             add(listOf(Key("Пробел", 2, Act.SPACE), Key("Стереть", 2, Act.DELETE), Key(if (russian) "EN" else "RU", 1, Act.LANG), Key("", 1, Act.VOICE)))
-            val chars = (if (russian) "абвгдеёжзийклмнопрстуфхцчшщъыьэюя" else "abcdefghijklmnopqrstuvwxyz") + "1234567890"
+            // Signs that titles use («Человек-паук», «Миссия: невыполнима»), as many as fill the last line: no key left alone.
+            val chars = (if (russian) "абвгдеёжзийклмнопрстуфхцчшщъыьэюя" else "abcdefghijklmnopqrstuvwxyz") + "1234567890" +
+                (if (russian) "-:.,!" else "-:.,!&")
             chars.chunked(COLS).forEach { line -> add(line.map { Key(it.toString()) }) }
         }
 

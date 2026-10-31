@@ -82,10 +82,10 @@ fun WatchScreen(
     AnimatedVisibility(visible && w != null, enter = fadeIn(tween(300)), exit = fadeOut(tween(200))) {
         val s = w ?: return@AnimatedVisibility
         Box(Modifier.fillMaxSize().background(Colors.Bg)) {
-            AsyncImage(Tmdb.img(s.title.backdrop ?: d?.backdrop, "w1280"), null, Modifier.fillMaxSize().graphicsLayer { alpha = 0.55f },
+            // The picture's alpha is the painter's (no offscreen layer); the scrim is a baked strip.
+            AsyncImage(Tmdb.img(s.title.backdrop ?: d?.backdrop, "w1280"), null, Modifier.fillMaxSize(), alpha = 0.55f,
                 contentScale = ContentScale.Crop)
-            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(
-                0f to Color(0xFA050608), 0.5f to Color(0xE6050608), 1f to Color(0x8C050608))))
+            BakedGradient(listOf(0f to Color(0xFA050608), 0.5f to Color(0xE6050608), 1f to Color(0x8C050608)), Modifier.fillMaxSize())
 
             // «В ролях», then «Похожее», sit right under the files (or the message); a long list pushes them below the screen,
             // and the page scrolls up while the focus is in one.
@@ -106,9 +106,9 @@ fun WatchScreen(
             Box(Modifier.fillMaxSize().graphicsLayer { translationY = -scroll.value * LocalScaleHolder.px }) {
                 Box(Modifier.offset(x = 96.u, y = 70.u)) { LogoTitle(s.title.name, Tmdb.img(d?.logo, "w500"), 76f, maxW = 820, maxH = 110) }
                 Column(Modifier.offset(x = 96.u, y = 196.u).width(1040.u), verticalArrangement = Arrangement.spacedBy(12.u)) {
-                    MetaLine(heroOf(s.title, d, newEpisode), size = 23)
+                    MetaLine(heroOf(s.title, d, newEpisode))
                     BasicText(s.title.overview, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        style = text(23, 400, Color(0xD6ECEFF5)).merge(TextStyle(lineHeight = 1.4.em)))
+                        style = text(Type.SMALL, 400, Colors.Body).merge(TextStyle(lineHeight = 1.4.em)))
                 }
 
                 // The pills are there in every phase: a title with no sources (yet) can still be bookmarked.
@@ -131,8 +131,8 @@ fun WatchScreen(
 @Composable
 private fun Message(text: String, hint: String?) {
     Column(Modifier.offset(x = 96.u, y = LIST_Y.u).widthIn(max = 1100.u), verticalArrangement = Arrangement.spacedBy(14.u)) {
-        BasicText(text, style = text(30, 500))
-        hint?.let { BasicText(it, style = text(24, 400, Colors.Muted)) }
+        BasicText(text, style = text(Type.LARGE, 500))
+        hint?.let { BasicText(it, style = text(Type.SMALL, 400, Colors.Muted)) }
     }
 }
 
@@ -140,12 +140,12 @@ private fun Message(text: String, hint: String?) {
 private fun Auth(code: Int) {
     Row(Modifier.offset(x = 96.u, y = LIST_Y.u), horizontalArrangement = Arrangement.spacedBy(80.u)) {
         Column(Modifier.width(900.u), verticalArrangement = Arrangement.spacedBy(22.u)) {
-            BasicText("Подключите Showy", style = text(44, 800))
+            BasicText("Подключите Showy", style = text(Type.HEADING, 800))
             BasicText("Отправьте этот код боту @showybot в Telegram или наведите камеру телефона на QR-код. Экран обновится сам.",
-                style = text(27, 400, Colors.Muted).merge(TextStyle(lineHeight = 1.4.em)))
+                style = text(Type.BODY, 400, Colors.Muted).merge(TextStyle(lineHeight = 1.4.em)))
             BasicText(if (code > 0) code.toString() else "······", style = text(110, 800).merge(TextStyle(letterSpacing = 0.12.em)))
         }
-        if (code > 0) Box(Modifier.size(380.u).clip(RoundedCornerShape(28.u)).background(Color.White).padding(24.u)) {
+        if (code > 0) Box(Modifier.size(380.u).clip(Shapes.menu).background(Color.White).padding(24.u)) {
             AsyncImage("http://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=0&data=https://t.me/showybot?start=$code", null,
                 Modifier.fillMaxSize())
         }
@@ -154,7 +154,7 @@ private fun Auth(code: Int) {
 
 @Composable
 private fun Pills(s: WatchSession, bookmarked: Boolean) {
-    Row(Modifier.offset(x = 80.u, y = PILLS_Y.u), horizontalArrangement = Arrangement.spacedBy(12.u), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.offset(x = 96.u, y = PILLS_Y.u), horizontalArrangement = Arrangement.spacedBy(12.u), verticalAlignment = Alignment.CenterVertically) {
         s.chips.forEachIndexed { i, c ->
             ChoicePill(chipLabel(s, c, bookmarked), s.zone == Zone.CHIPS && s.chip == i && s.picker == null, s.picker == c,
                 icon = when (c) {
@@ -163,7 +163,7 @@ private fun Pills(s: WatchSession, bookmarked: Boolean) {
                     else -> null
                 })
         }
-        if (s.busy) BasicText("Загрузка…", modifier = Modifier.padding(start = 16.u), style = text(24, 400, Colors.Muted))
+        if (s.busy) BasicText("Загрузка…", modifier = Modifier.padding(start = 16.u), style = text(Type.SMALL, 400, Colors.Muted))
     }
 }
 
@@ -173,13 +173,15 @@ private fun Ready(s: WatchSession) {
     val list = s.list
     val focus = if (s.zone == Zone.LIST && s.picker == null) s.idx else -1
     s.marks // the marks are read here, so a new result from ViMu (or the menu) redraws the rows
-    Column(Modifier.offset(x = 80.u, y = LIST_Y.u), verticalArrangement = Arrangement.spacedBy(ROW_GAP.u)) {
+    // The same quality on every row says nothing the source pill does not: shown only where the rows differ.
+    val oneQuality = list.map { s.quality(it) }.filter { it.isNotEmpty() }.distinct().size <= 1
+    Column(Modifier.offset(x = 96.u, y = LIST_Y.u), verticalArrangement = Arrangement.spacedBy(ROW_GAP.u)) {
         val first = (s.idx - 3).coerceIn(0, (list.size - ROWS).coerceAtLeast(0))
         for (i in first until (first + ROWS).coerceAtMost(list.size)) {
             val item = list[i]
-            if (s.files.isEmpty()) SimilarRow(s, item, i == focus) else FileRow(s, item, i == focus, s.mark(item))
+            if (s.files.isEmpty()) SimilarRow(s, item, i == focus) else FileRow(s, item, i == focus, s.rowMark(item), !oneQuality)
         }
-        if (s.note.isNotEmpty()) BasicText(s.note, modifier = Modifier.padding(start = 16.u, top = 12.u), style = text(25, 400, Colors.Muted))
+        if (s.note.isNotEmpty()) BasicText(s.note, modifier = Modifier.padding(start = 16.u, top = 12.u), style = text(Type.SMALL, 400, Colors.Muted))
     }
 }
 
@@ -189,7 +191,10 @@ private fun Related(s: WatchSession, top: Float, active: Boolean, accent: State<
     val step = POSTER_W + 30f
     val max = (s.related.size * step - (1920f - 96f * 2) + 30f).coerceAtLeast(0f)
     val shift = animateFloatAsState(((s.relIdx - 1) * step).coerceIn(0f, max), tween(340, easing = FastOutSlowInEasing), label = "rel")
-    BasicText("Похожее", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(27, 600, Color(0xEBECEFF5)))
+    BasicText("Похожее", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(Type.BODY, 600, Colors.Title))
+    // Only posters near the focus are composed (as on Home): the list can hold twenty.
+    val first = (s.relIdx - 6).coerceAtLeast(0)
+    val last = (s.relIdx + 10).coerceAtMost(s.related.lastIndex)
     // ModulateAlpha: dimmed, the row must not be cut to its bounds (the focused poster grows past them).
     Row(
         Modifier.offset(y = (top + REL_TITLE).u).wrapContentWidth(Alignment.Start, unbounded = true)
@@ -200,19 +205,10 @@ private fun Related(s: WatchSession, top: Float, active: Boolean, accent: State<
             },
         horizontalArrangement = Arrangement.spacedBy(30.u),
     ) {
-        s.related.forEachIndexed { i, t ->
-            val f = active && i == s.relIdx
-            val sc by animateFloatAsState(if (f) 1.1f else 1f, label = "rs")
-            val shape = RoundedCornerShape(18.u)
-            Box(
-                Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer { scaleX = sc; scaleY = sc }
-                    .shadow(if (f) 30.u else 8.u, shape, ambientColor = if (f) accent.value else Color.Black, spotColor = if (f) accent.value else Color.Black)
-                    .clip(shape).background(Color(0xFF15171C)),
-            ) {
-                AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                badge(t)?.let { NewEpisodeBadge(it) }
-                if (f) Box(Modifier.fillMaxSize().border(3.u, Color(0xE6FFFFFF), shape))
-            }
+        if (first > 0) Spacer(Modifier.width((first * step - 30f).u))
+        for (i in first..last) {
+            val t = s.related[i]
+            androidx.compose.runtime.key(t.key) { FocusPoster(t, active && i == s.relIdx, POSTER_W, POSTER_H, accent, badge) }
         }
     }
 }
@@ -223,7 +219,9 @@ private fun Cast(s: WatchSession, top: Float, active: Boolean, accent: State<Col
     val step = CAST_W + 20f
     val max = (s.cast.size * step - (1920f - 96f * 2) + 20f).coerceAtLeast(0f)
     val shift = animateFloatAsState(((s.castIdx - 1) * step).coerceIn(0f, max), tween(340, easing = FastOutSlowInEasing), label = "cast")
-    BasicText("В ролях", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(27, 600, Color(0xEBECEFF5)))
+    BasicText("В ролях", modifier = Modifier.offset(x = 96.u, y = top.u), style = text(Type.BODY, 600, Colors.Title))
+    val first = (s.castIdx - 6).coerceAtLeast(0)
+    val last = (s.castIdx + 10).coerceAtMost(s.cast.lastIndex)
     Row(
         Modifier.offset(y = (top + REL_TITLE).u).wrapContentWidth(Alignment.Start, unbounded = true)
             .graphicsLayer {
@@ -233,31 +231,41 @@ private fun Cast(s: WatchSession, top: Float, active: Boolean, accent: State<Col
             },
         horizontalArrangement = Arrangement.spacedBy(20.u),
     ) {
-        s.cast.forEachIndexed { i, p -> Actor(p, active && i == s.castIdx, accent) }
+        if (first > 0) Spacer(Modifier.width((first * step - 20f).u))
+        for (i in first..last) {
+            val p = s.cast[i]
+            androidx.compose.runtime.key(p.id) { Actor(p, active && i == s.castIdx, accent) }
+        }
     }
 }
 
 @Composable
 private fun Actor(p: Person, focused: Boolean, accent: State<Color>) {
-    val sc by animateFloatAsState(if (focused) 1.1f else 1f, label = "cs")
+    // Shadow only on the focused photo, read at draw time, as the posters do.
+    val f = animateFloatAsState(if (focused) 1f else 0f, tween(200), label = "cs")
+    val px = LocalScaleHolder.px
     Column(Modifier.width(CAST_W.u), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.u)) {
         Box(
-            Modifier.graphicsLayer { scaleX = sc; scaleY = sc }
-                .shadow(if (focused) 30.u else 8.u, CircleShape, ambientColor = if (focused) accent.value else Color.Black,
-                    spotColor = if (focused) accent.value else Color.Black),
+            Modifier.graphicsLayer {
+                val k = 1f + (FocusSpec.TILE - 1f) * f.value
+                scaleX = k; scaleY = k
+                shadowElevation = 30f * f.value * px
+                ambientShadowColor = accent.value; spotShadowColor = accent.value
+                shape = CircleShape
+            },
         ) {
             Avatar(p, PHOTO)
-            if (focused) Box(Modifier.size(PHOTO.u).border(3.u, Color(0xE6FFFFFF), CircleShape))
+            if (focused) Box(Modifier.size(PHOTO.u).border(FocusSpec.RING.u, Colors.FocusRing, CircleShape))
         }
         BasicText(p.name, maxLines = 2, overflow = TextOverflow.Ellipsis,
-            style = text(20, if (focused) 600 else 500, if (focused) Colors.Fg else Colors.Muted).merge(TextStyle(textAlign = TextAlign.Center, lineHeight = 1.3.em)))
+            style = text(Type.CAPTION, if (focused) 600 else 500, if (focused) Colors.Fg else Colors.Muted).merge(TextStyle(textAlign = TextAlign.Center, lineHeight = 1.3.em)))
     }
 }
 
 /** An actor's round photo; their initials when TMDB has none. */
 @Composable
 internal fun Avatar(p: Person, size: Float) {
-    Box(Modifier.size(size.u).clip(CircleShape).background(Color(0xFF1C1F26)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size.u).clip(CircleShape).background(Colors.Placeholder), contentAlignment = Alignment.Center) {
         val url = Tmdb.img(p.photo, "w185")
         if (url != null) AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else BasicText(p.name.split(' ').filter { it.isNotEmpty() }.take(2).joinToString("") { it.take(1) }.uppercase(),
@@ -277,43 +285,43 @@ private fun chipLabel(s: WatchSession, c: Chip, bookmarked: Boolean): String = w
 private fun ChoicePill(label: String, focused: Boolean, open: Boolean, icon: androidx.compose.ui.graphics.vector.ImageVector? = null) {
     val fg = if (focused) Colors.FocusFg else Colors.Fg
     Row(
-        Modifier.height(64.u).clip(RoundedCornerShape(32.u))
-            .background(if (focused) Color.White else if (open) Color(0x33FFFFFF) else Color(0x1AFFFFFF))
+        Modifier.height(64.u).clip(Shapes.pill)
+            .background(if (focused) Colors.Focus else if (open) Colors.PaleStrong else Colors.Pale)
             .padding(start = 28.u, end = 20.u),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.u),
     ) {
         // An action pill (the trailer) leads with its icon; a choice ends with the chevron of its list.
         icon?.let { Ico(it, 28.u, fg) }
-        BasicText(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 420.u), style = text(24, 600, fg))
+        BasicText(label, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 420.u), style = text(Type.SMALL, 600, fg))
         if (icon == null) Ico(Icons.Down, 26.u, fg)
     }
 }
 
 @Composable
-private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean, mark: ru.homescreen.tv.data.History.Mark?) {
+private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean, mark: ru.homescreen.tv.data.History.Mark?, showQuality: Boolean) {
     val ep = s.episode(item)
     if (focused) LaunchedEffect(item.url) { s.probe(item) }
     val fg = if (focused) Colors.FocusFg else Colors.Fg
-    val sub = if (focused) Color(0x990B0C0F) else Colors.Muted
-    val shape = RoundedCornerShape((ROW_H / 2).u)
+    val sub = if (focused) Colors.OnFocusMuted else Colors.Muted
+    val shape = Shapes.pill
     val name = ep?.name?.trim()?.takeIf { !Tmdb.genericEpisode(it) }
     Box(Modifier.width(1040.u).height(ROW_H.u).clip(shape).background(if (focused) Color.White else Color.Transparent)) {
         Row(Modifier.fillMaxSize().padding(horizontal = 28.u), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.u)) {
             if (name != null) {
-                BasicText(item.episode.toString(), modifier = Modifier.width(40.u), style = text(25, 500, sub))
-                BasicText(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(27, 500, fg))
+                BasicText(item.episode.toString(), modifier = Modifier.width(40.u), style = text(Type.SMALL, 500, sub))
+                BasicText(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(Type.BODY, 500, fg))
             } else {
-                BasicText(item.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(27, 500, fg))
+                BasicText(item.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(Type.BODY, 500, fg))
             }
-            ep?.runtime?.takeIf { it > 0 }?.let { BasicText("$it мин", style = text(21, 400, sub)) }
-            item.hdr?.let { BasicText(it, style = text(21, 500, sub)) }
-            item.sizeGb?.let { BasicText(gb(it), style = text(21, 600, fg)) }
-            s.quality(item).takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(21, 500, sub)) }
+            ep?.runtime?.takeIf { it > 0 }?.let { BasicText("$it мин", style = text(Type.CAPTION, 400, sub)) }
+            item.hdr?.let { BasicText(it, style = text(Type.CAPTION, 500, sub)) }
+            item.sizeGb?.let { BasicText(gb(it), style = text(Type.CAPTION, 600, fg)) }
+            if (showQuality) s.quality(item).takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(Type.CAPTION, 500, sub)) }
             ep?.vote?.takeIf { it > 0 }?.let { v ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.u)) {
                     Ico(Icons.Star, 20.u, if (focused) Color(0xFFD99A00) else Colors.Gold)
-                    BasicText("%.1f".format(v), style = text(21, 600, fg))
+                    BasicText("%.1f".format(v), style = text(Type.CAPTION, 600, fg))
                 }
             }
             if (mark?.done == true) Ico(Icons.Check, 30.u, fg)
@@ -321,7 +329,7 @@ private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean, mark: r
         val p = mark?.progress ?: 0f
         if (p > 0.01f && mark?.done != true) Box(
             Modifier.align(Alignment.BottomStart).padding(start = 28.u, end = 28.u, bottom = 10.u).fillMaxWidth().height(4.u)
-                .clip(RoundedCornerShape(2.u)).background(if (focused) Color(0x260B0C0F) else Color(0x33FFFFFF)),
+                .clip(Shapes.pill).background(if (focused) Color(0x260B0C0F) else Colors.PaleStrong),
         ) { Box(Modifier.fillMaxWidth(p).fillMaxHeight().background(if (focused) Colors.FocusFg else Color.White)) }
     }
 }
@@ -329,23 +337,23 @@ private fun FileRow(s: WatchSession, item: Showy.Item, focused: Boolean, mark: r
 @Composable
 private fun SimilarRow(s: WatchSession, item: Showy.Item, focused: Boolean) {
     val fg = if (focused) Colors.FocusFg else Colors.Fg
-    val sub = if (focused) Color(0x990B0C0F) else Colors.Muted
+    val sub = if (focused) Colors.OnFocusMuted else Colors.Muted
     Row(
-        Modifier.width(1040.u).height(ROW_H.u).clip(RoundedCornerShape((ROW_H / 2).u)).background(if (focused) Color.White else Color.Transparent)
+        Modifier.width(1040.u).height(ROW_H.u).clip(Shapes.pill).background(if (focused) Color.White else Color.Transparent)
             .padding(horizontal = 28.u),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(18.u),
     ) {
         BasicText(item.json.optString("title").ifEmpty { item.text }, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f), style = text(27, 500, fg))
+            modifier = Modifier.weight(1f), style = text(Type.BODY, 500, fg))
         // A series' torrent shows its facts as a film's variant does; a search result its year and details.
         val size = item.sizeGb
         if (size != null) {
-            item.hdr?.let { BasicText(it, style = text(21, 500, sub)) }
-            BasicText(gb(size), style = text(21, 600, fg))
-            s.quality(item).takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(21, 500, sub)) }
-        } else listOf(item.year, item.details).filter { it.isNotEmpty() }.joinToString(" · ").takeIf { it.isNotEmpty() }
-            ?.let { BasicText(it, maxLines = 1, style = text(21, 400, sub)) }
+            item.hdr?.let { BasicText(it, style = text(Type.CAPTION, 500, sub)) }
+            BasicText(gb(size), style = text(Type.CAPTION, 600, fg))
+            s.quality(item).takeIf { it.isNotEmpty() }?.let { BasicText(it, style = text(Type.CAPTION, 500, sub)) }
+        } else listOf(item.year, item.details).filter { it.isNotEmpty() }.joinToString(", ").takeIf { it.isNotEmpty() }
+            ?.let { BasicText(it, maxLines = 1, style = text(Type.CAPTION, 400, sub)) }
     }
 }
 
@@ -366,9 +374,9 @@ private fun Picker(s: WatchSession, c: Chip) {
         Chip.TRAILER, Chip.BOOKMARK -> -1
     }
     val rows = 9
-    val shape = RoundedCornerShape(30.u)
+    val shape = Shapes.menu
     Column(
-        Modifier.offset(x = 80.u, y = (LIST_Y - 10f).u).width(640.u).shadow(40.u, shape).clip(shape).background(Color(0xF5181A1F)).padding(12.u),
+        Modifier.offset(x = 96.u, y = (LIST_Y - 10f).u).width(640.u).shadow(20.u, shape).clip(shape).background(Colors.Surface).padding(12.u),
         verticalArrangement = Arrangement.spacedBy(4.u),
     ) {
         val first = (s.pickIdx - 4).coerceIn(0, (labels.size - rows).coerceAtLeast(0))
@@ -377,19 +385,19 @@ private fun Picker(s: WatchSession, c: Chip) {
             val f = i == s.pickIdx
             val fg = if (f) Colors.FocusFg else Colors.Fg
             Row(
-                Modifier.fillMaxWidth().height(60.u).clip(RoundedCornerShape(22.u)).background(if (f) Color.White else Color.Transparent)
+                Modifier.fillMaxWidth().height(60.u).clip(Shapes.card).background(if (f) Color.White else Color.Transparent)
                     .padding(horizontal = 22.u),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.u),
             ) {
-                BasicText(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(24, 500, fg))
-                if (extra.isNotEmpty()) BasicText(extra, style = text(19, 400, if (f) Color(0x990B0C0F) else Colors.Muted))
+                BasicText(name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f), style = text(Type.SMALL, 500, fg))
+                if (extra.isNotEmpty()) BasicText(extra, style = text(Type.CAPTION, 400, if (f) Colors.OnFocusMuted else Colors.Muted))
                 if (i == current) Ico(Icons.Check, 26.u, fg)
             }
         }
         if (c == Chip.SOURCE && !s.sourcesDone) {
             Spacer(Modifier.height(4.u))
-            BasicText("Ищем ещё…", modifier = Modifier.padding(horizontal = 22.u, vertical = 10.u), style = text(21, 400, Colors.Muted))
+            BasicText("Ищем ещё…", modifier = Modifier.padding(horizontal = 22.u, vertical = 10.u), style = text(Type.CAPTION, 400, Colors.Muted))
         }
     }
 }

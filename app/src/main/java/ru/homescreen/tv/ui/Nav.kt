@@ -58,7 +58,7 @@ class Nav {
     var trailer by mutableStateOf(false)
     var toast by mutableStateOf<String?>(null)
 
-    /** Spring "kick" of the focused tile toward the direction of the move, in degrees. */
+    /** Spring "kick" of the focused tile toward the direction of the move, in degrees; settles in about half a second. */
     val kickX = Animatable(0f)
     val kickY = Animatable(0f)
 
@@ -66,11 +66,11 @@ class Nav {
         if (dx == 0 && dy == 0) return
         scope.launch {
             kickY.snapTo(dx * 9f)
-            kickY.animateTo(0f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessLow))
+            kickY.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow))
         }
         scope.launch {
             kickX.snapTo(-dy * 7f)
-            kickX.animateTo(0f, spring(dampingRatio = 0.35f, stiffness = Spring.StiffnessLow))
+            kickX.animateTo(0f, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMediumLow))
         }
     }
 
