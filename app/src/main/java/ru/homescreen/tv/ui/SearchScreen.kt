@@ -44,6 +44,7 @@ import ru.homescreen.tv.SearchSession.Act
 import ru.homescreen.tv.SearchSession.Zone
 import ru.homescreen.tv.VoiceInput
 import ru.homescreen.tv.data.Media
+import ru.homescreen.tv.data.Title
 import ru.homescreen.tv.data.Tmdb
 
 private const val KEY_W = 84f
@@ -169,29 +170,34 @@ private fun Results(w: SearchSession) {
     val y by animateFloatAsState(-((focusRow - 1).coerceAtLeast(0)) * step, tween(400, easing = FastOutSlowInEasing), label = "sy")
     Box(Modifier.offset(x = RESULTS_X.u, y = GRID_Y.u).graphicsLayer { translationY = y * LocalScaleHolder.px }) {
         val firstRow = (focusRow - 2).coerceAtLeast(0)
-        list.chunked(cols).forEachIndexed { r, line ->
-            if (r in firstRow..focusRow + 3) Row(Modifier.offset(y = (r * step).u), horizontalArrangement = Arrangement.spacedBy(POSTER_GAP.u)) {
-                line.forEachIndexed { c, t ->
-                    val f = inGrid && r * cols + c == w.idx
-                    val p = animateFloatAsState(if (f) 1f else 0f, tween(200), label = "ss")
-                    val shape = Shapes.card
-                    val px = LocalScaleHolder.px
+        val lastRow = minOf(focusRow + 3, (list.size - 1) / cols)
+        for (r in firstRow..lastRow) {
+            Row(Modifier.offset(y = (r * step).u), horizontalArrangement = Arrangement.spacedBy(POSTER_GAP.u)) {
+                for (i in r * cols until minOf((r + 1) * cols, list.size)) {
+                    val t = list[i]
                     // No sources in Showy: grey and dim, still openable.
-                    val none = w.sources[t.key] == false
-                    Box(
-                        Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer {
-                            val k = 1f + (FocusSpec.TILE - 1f) * p.value
-                            scaleX = k; scaleY = k
-                            shadowElevation = 30f * p.value * px
-                            this.shape = shape; clip = true
-                        }.background(Colors.Placeholder),
-                    ) {
-                        AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), alpha = if (none) 0.35f else 1f,
-                            contentScale = ContentScale.Crop, colorFilter = if (none) GREY else null)
-                        if (f) Box(Modifier.fillMaxSize().border(FocusSpec.RING.u, Colors.FocusRing, shape))
-                    }
+                    androidx.compose.runtime.key(t.key) { ResultPoster(t, inGrid && i == w.idx, none = w.sources[t.key] == false) }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ResultPoster(t: Title, focused: Boolean, none: Boolean) {
+    val p = animateFloatAsState(if (focused) 1f else 0f, tween(200), label = "ss")
+    val shape = Shapes.card
+    val px = LocalScaleHolder.px
+    Box(
+        Modifier.size(POSTER_W.u, POSTER_H.u).graphicsLayer {
+            val k = 1f + (FocusSpec.TILE - 1f) * p.value
+            scaleX = k; scaleY = k
+            shadowElevation = 30f * p.value * px
+            this.shape = shape; clip = true
+        }.background(Colors.Placeholder),
+    ) {
+        AsyncImage(Tmdb.img(t.poster, "w342"), null, Modifier.fillMaxSize(), alpha = if (none) 0.35f else 1f,
+            contentScale = ContentScale.Crop, colorFilter = if (none) GREY else null)
+        if (focused) Box(Modifier.fillMaxSize().border(FocusSpec.RING.u, Colors.FocusRing, shape))
     }
 }

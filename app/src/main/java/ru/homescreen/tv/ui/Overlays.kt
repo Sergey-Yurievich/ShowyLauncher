@@ -289,16 +289,18 @@ fun GridScreen(
             }
             // Clipped below the title (the clip is outside the scroll): rows scrolled up must not run over it.
             Box(Modifier.fillMaxSize().padding(top = 150.u).clipToBounds().graphicsLayer { translationY = y * LocalScaleHolder.px }.padding(top = 30.u)) {
+                // Only the rows around the focus are composed; an actor's films can run to a few hundred.
                 val firstRow = (fr - 2).coerceAtLeast(0)
-                val lastRow = fr + 3
-                items.chunked(cols).forEachIndexed { ri, line ->
-                    if (ri in firstRow..lastRow) Row(
+                val lastRow = minOf(fr + 3, (items.size - 1) / cols)
+                for (ri in firstRow..lastRow) {
+                    Row(
                         Modifier.offset(x = 96.u, y = (ri * rowH).u),
                         horizontalArrangement = Arrangement.spacedBy(GRID_GAP.u),
                     ) {
-                        line.forEachIndexed { ci, t ->
+                        for (i in ri * cols until minOf((ri + 1) * cols, items.size)) {
+                            val t = items[i]
                             androidx.compose.runtime.key(t.key) {
-                                FocusPoster(t, ri * cols + ci == focus, GRID_W, GRID_H, accent, badge)
+                                FocusPoster(t, i == focus, GRID_W, GRID_H, accent, badge)
                             }
                         }
                     }

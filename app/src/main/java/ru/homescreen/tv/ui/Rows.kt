@@ -183,11 +183,14 @@ private fun RowView(
         val h = Geo.h(row.kind)
         if (row.kind == RowKind.APP_GRID) {
             Column(Modifier.offset(x = Geo.LEFT.u, y = Geo.TITLE.u), verticalArrangement = Arrangement.spacedBy(Geo.GRID_GAP_Y.u)) {
-                row.tiles.chunked(Geo.GRID_COLS).forEachIndexed { li, line ->
+                // Keyed by app: moving one keeps each tile's focus animation with its app, not with its place.
+                for (start in row.tiles.indices step Geo.GRID_COLS) {
                     Row(horizontalArrangement = Arrangement.spacedBy(Geo.GAP.u)) {
-                        line.forEachIndexed { ci, tile ->
-                            val idx = li * Geo.GRID_COLS + ci
-                            TileView(tile, row.kind, w, h, idx == focusedCol, nav, vm, accent)
+                        for (idx in start until minOf(start + Geo.GRID_COLS, row.tiles.size)) {
+                            val tile = row.tiles[idx]
+                            androidx.compose.runtime.key(tile.key) {
+                                TileView(tile, row.kind, w, h, idx == focusedCol, nav, vm, accent)
+                            }
                         }
                     }
                 }
