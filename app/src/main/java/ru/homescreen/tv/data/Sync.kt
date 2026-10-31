@@ -8,6 +8,7 @@ import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,10 @@ import java.security.SecureRandom
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.X509EncodedKeySpec
 import java.util.UUID
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
@@ -76,7 +81,24 @@ class Sync(
         private set
     /** A line for the user ("Связано с …"); the screen shows it once and clears it. */
     var note by mutableStateOf<String?>(null)
+    /** The code both TVs show before the key is handed over; null when there is nothing to confirm. */
+    var confirm by mutableStateOf<Confirm?>(null)
+        private set
 
+    /** [waiting]: this TV said yes, the other has not yet. */
+    data class Confirm(val name: String, val code: String, val waiting: Boolean = false)
+
+    /** The leader's side of a link being confirmed: the other TV's request, and the secret both derived. */
+    private class Pending(val peer: Peer, val commit: String, val keys: KeyPair) {
+        @Volatile var secret: ByteArray? = null
+        @Volatile var accepted = false
+    }
+
+    @Volatile private var pending: Pending? = null
+    private val pairLock = Any()
+    /** The asking TV's side: the user's answer to the code, and where the leader is (to tell it of «Отмена»). */
+    @Volatile private var answer: CompletableDeferred<Boolean>? = null
+    @Volatile private var asking: Pair<String, Int>? = null
     @Volatile private var pairUntil = 0L
     private val pairBusy = AtomicBoolean(false)
     private val lastSync = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -132,9 +154,28 @@ class Sync(
         pairing = true
         announceLoop()
         scope.launch {
-            delay(PAIR_MS)
-            if (pairing && System.currentTimeMillis() >= pairUntil) endPairing("Другой ТВ не нашёлся")
+            // The window grows once a code is on screen: there is time to walk to the other TV.
+            while (pairing) {
+                val left = pairUntil - System.currentTimeMillis()
+                if (left <= 0) { endPairing(if (confirm != null) "Не подтвердили вовремя" else "Другой ТВ не нашёлся"); break }
+                delay(left)
+            }
         }
+    }
+
+    /** «Да, связать» on the code. */
+    fun accept() {
+        val c = confirm ?: return
+        confirm = c.copy(waiting = true)
+        pending?.accepted = true
+        answer?.complete(true)
+    }
+
+    /** «Отмена» on the code, or Back. */
+    fun decline() {
+        // An asking TV tells the leader; a leader's «Отмена» reaches the other TV as the answer to its next request.
+        asking?.let { (host, port) -> scope.launch(Dispatchers.IO) { request(host, port, JSONObject().put("t", "cancel").put("id", id)) } }
+        endPairing(null)
     }
 
     /** Leaves the group: this TV keeps its history but no longer shares it. */
@@ -147,6 +188,10 @@ class Sync(
     private fun endPairing(message: String?) {
         pairUntil = 0L
         pairing = false
+        pending = null
+        confirm = null
+        answer?.complete(false)
+        answer = null
         message?.let { note = it }
         announceLoop()
     }
@@ -207,27 +252,39 @@ class Sync(
             return
         }
         server = ss
+        // A household has two or three TVs: a couple of requests at a time is plenty, and anything past a short queue
+        // is dropped rather than given a thread (each request may hold up to MAX_LINE in memory).
+        val workers = ThreadPoolExecutor(SERVER_THREADS, SERVER_THREADS, 30, TimeUnit.SECONDS, ArrayBlockingQueue(SERVER_QUEUE))
         thread(name = "sync-server", isDaemon = true) {
             while (!ss.isClosed) {
                 val s = try { ss.accept() } catch (e: Exception) { break }
-                thread(name = "sync-conn", isDaemon = true) {
-                    s.use {
-                        try {
-                            it.soTimeout = 15_000
-                            val req = JSONObject(readLine(it.getInputStream().buffered()) ?: return@use)
-                            val host = it.inetAddress.hostAddress ?: return@use
-                            val resp = when (req.optString("t")) {
-                                "pair" -> answerPair(req, host)
-                                "sync" -> answerSync(req, host)
-                                else -> error("?")
-                            }
-                            it.getOutputStream().apply { write((resp.toString() + "\n").toByteArray()); flush() }
-                        } catch (e: Exception) {
-                            Log.i(TAG, "sync: request failed: $e")
-                        }
-                    }
+                try {
+                    workers.execute { answer(s) }
+                } catch (e: RejectedExecutionException) {
+                    runCatching { s.close() }
                 }
             }
+            workers.shutdown()
+        }
+    }
+
+    private fun answer(s: Socket) = s.use {
+        try {
+            it.soTimeout = 5_000
+            val deadline = System.currentTimeMillis() + REQUEST_MS
+            val req = JSONObject(readLine(it.getInputStream().buffered(), deadline) ?: return@use)
+            val host = it.inetAddress.hostAddress ?: return@use
+            val resp = when (req.optString("t")) {
+                "pair" -> answerPair(req, host)
+                "reveal" -> answerReveal(req)
+                "confirm" -> answerConfirm(req)
+                "cancel" -> answerCancel(req)
+                "sync" -> answerSync(req, host)
+                else -> error("?")
+            }
+            it.getOutputStream().apply { write((resp.toString() + "\n").toByteArray()); flush() }
+        } catch (e: Exception) {
+            Log.i(TAG, "sync: request failed: $e")
         }
     }
 
@@ -264,49 +321,126 @@ class Sync(
         }
     }
 
+    /*
+     * Linking, in four requests from the asking TV to the leader ([leads]):
+     *   pair    — its id and a hash of its public key (the commitment); the leader answers with its own public key.
+     *   reveal  — the public key itself; the leader checks it against the hash. Both now hold the same ECDH secret and
+     *             show the same four digits ([code]). A device in the middle would have to pick its keys before seeing
+     *             the other side's, so it cannot make the two codes match.
+     *   confirm — sent once «Да» is pressed here, repeated until «Да» is pressed there too; only then the group key is
+     *             handed over, encrypted with the secret.
+     *   cancel  — «Отмена» here; the leader drops the code too.
+     * Without the code any device on the network could have asked for the key during the two minutes.
+     */
+
     private fun answerPair(req: JSONObject, host: String): JSONObject {
         if (!pairingNow()) return error("not pairing")
-        if (!leads(req.optString("g"), req.optString("id"))) return error("not leader")
-        val k = key ?: random(32).also { setKey(it) }
-        val kp = ecKeys()
-        val secret = agree(kp.private, req.getString("pub"))
-        val iv = random(12)
-        val peer = Peer(req.optString("id"), req.optString("n"), host, req.optInt("p", TCP_PORT))
-        scope.launch {
-            upsert(peer)
-            endPairing("Связано с «${peer.name}»")
+        if (req.optInt("v") < PAIR_VERSION) {
+            note = UPDATE_OTHER
+            return error("update")
         }
-        Log.i(TAG, "sync: linked $host (gave the key)")
-        return JSONObject().put("id", id).put("n", name).put("pub", b64(kp.public.encoded)).put("iv", b64(iv))
-            .put("k", b64(aes(Cipher.ENCRYPT_MODE, secret, iv, k, "pair")))
+        if (!leads(req.optString("g"), req.optString("id"))) return error("not leader")
+        val commit = req.optString("c").takeIf { it.isNotEmpty() } ?: return error("?")
+        val peer = Peer(req.optString("id"), req.optString("n"), host, req.optInt("p", TCP_PORT))
+        synchronized(pairLock) {
+            // One TV at a time; the same one asking again (after a lost answer) starts over.
+            if (pending?.let { it.peer.id != peer.id } == true) return error("busy")
+            val kp = ecKeys()
+            pending = Pending(peer, commit, kp)
+            return JSONObject().put("id", id).put("n", name).put("pub", b64(kp.public.encoded))
+        }
+    }
+
+    private fun answerReveal(req: JSONObject): JSONObject {
+        val p = pending?.takeIf { it.peer.id == req.optString("id") } ?: return error("cancel")
+        val pub = req.getString("pub")
+        if (hex(sha256(b64d(pub))) != p.commit) return error("auth")
+        val secret = agree(p.keys.private, pub)
+        p.secret = secret
+        pairUntil = System.currentTimeMillis() + PAIR_MS
+        confirm = Confirm(p.peer.name, code(secret))
+        return JSONObject().put("ok", true)
+    }
+
+    private fun answerConfirm(req: JSONObject): JSONObject {
+        val p = pending?.takeIf { it.peer.id == req.optString("id") } ?: return error("cancel")
+        val secret = p.secret ?: return error("cancel")
+        try {
+            aes(Cipher.DECRYPT_MODE, secret, b64d(req.getString("iv")), b64d(req.getString("c")), "confirm")
+        } catch (e: Exception) {
+            return error("auth")
+        }
+        if (!p.accepted) return error("wait")
+        val k = key ?: random(32).also { setKey(it) }
+        val iv = random(12)
+        scope.launch {
+            upsert(p.peer)
+            endPairing("Связано с «${p.peer.name}»")
+        }
+        Log.i(TAG, "sync: linked ${p.peer.host} (gave the key)")
+        return JSONObject().put("iv", b64(iv)).put("k", b64(aes(Cipher.ENCRYPT_MODE, secret, iv, k, "pair")))
+    }
+
+    private fun answerCancel(req: JSONObject): JSONObject {
+        if (pending?.peer?.id == req.optString("id")) scope.launch { endPairing("Отменено на другом ТВ") }
+        return JSONObject().put("ok", true)
     }
 
     private fun pairWith(a: Announce, host: String) {
         if (!pairBusy.compareAndSet(false, true)) return
         scope.launch {
             try {
-                val got = withContext(Dispatchers.IO) {
-                    val kp = ecKeys()
-                    val resp = request(host, a.port, JSONObject().put("t", "pair").put("id", id).put("n", name).put("g", group)
-                        .put("p", TCP_PORT).put("pub", b64(kp.public.encoded))) ?: return@withContext null
-                    if (resp.has("e")) return@withContext null
-                    val secret = agree(kp.private, resp.getString("pub"))
-                    aes(Cipher.DECRYPT_MODE, secret, b64d(resp.getString("iv")), b64d(resp.getString("k")), "pair").takeIf { it.size == 32 }
+                val kp = ecKeys()
+                val ask = { body: JSONObject -> request(host, a.port, body.put("id", id)) }
+                val first = withContext(Dispatchers.IO) {
+                    ask(JSONObject().put("t", "pair").put("v", PAIR_VERSION).put("n", name).put("g", group).put("p", TCP_PORT)
+                        .put("c", hex(sha256(kp.public.encoded))))
                 } ?: return@launch
-                // A new group: the TVs of the old one are left behind.
-                val newGroup = !got.contentEquals(key)
-                setKey(got)
-                val peer = Peer(a.id, a.name, host, a.port)
-                if (newGroup) savePeers(listOf(peer)) else upsert(peer)
-                Log.i(TAG, "sync: linked $host (took the key)")
-                endPairing("Связано с «${a.name}»")
-                syncWith(peer)
+                if (first.has("e")) return@launch
+                val secret = agree(kp.private, first.getString("pub"))
+                val revealed = withContext(Dispatchers.IO) { ask(JSONObject().put("t", "reveal").put("pub", b64(kp.public.encoded))) }
+                if (revealed == null || revealed.has("e")) return@launch
+
+                val said = CompletableDeferred<Boolean>().also { answer = it }
+                asking = host to a.port
+                pairUntil = System.currentTimeMillis() + PAIR_MS
+                confirm = Confirm(a.name, code(secret))
+                if (!said.await()) return@launch
+
+                while (pairingNow()) {
+                    val iv = random(12)
+                    val resp = withContext(Dispatchers.IO) {
+                        ask(JSONObject().put("t", "confirm").put("iv", b64(iv)).put("c", b64(aes(Cipher.ENCRYPT_MODE, secret, iv, OK, "confirm"))))
+                    }
+                    when {
+                        resp == null || resp.optString("e") == "wait" -> delay(1500)
+                        resp.has("e") -> { endPairing("Отменено на другом ТВ"); return@launch }
+                        else -> {
+                            val got = aes(Cipher.DECRYPT_MODE, secret, b64d(resp.getString("iv")), b64d(resp.getString("k")), "pair")
+                                .takeIf { it.size == 32 } ?: return@launch
+                            linked(got, Peer(a.id, a.name, host, a.port))
+                            return@launch
+                        }
+                    }
+                }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 Log.i(TAG, "sync: linking failed: $e")
             } finally {
+                asking = null
                 pairBusy.set(false)
             }
         }
+    }
+
+    private suspend fun linked(got: ByteArray, peer: Peer) {
+        // A new group: the TVs of the old one are left behind.
+        val newGroup = !got.contentEquals(key)
+        setKey(got)
+        if (newGroup) savePeers(listOf(peer)) else upsert(peer)
+        Log.i(TAG, "sync: linked ${peer.host} (took the key)")
+        endPairing("Связано с «${peer.name}»")
+        syncWith(peer)
     }
 
     private fun setKey(k: ByteArray) {
@@ -316,7 +450,8 @@ class Sync(
 
     // ---------- Finding each other ----------
 
-    private data class Announce(val id: String, val name: String, val port: Int, val group: String, val pair: Boolean)
+    /** [pairVersion]: how this TV links; 1 (before 1.10) hands the key over without a code. */
+    private data class Announce(val id: String, val name: String, val port: Int, val group: String, val pair: Boolean, val pairVersion: Int)
 
     /** Linked TVs say where they are once a minute; a TV waiting to be linked every two seconds. Others stay quiet. */
     private fun announceLoop() {
@@ -332,7 +467,7 @@ class Sync(
 
     private fun announce(pairingNow: Boolean) {
         val msg = JSONObject().put("a", APP).put("v", 1).put("id", id).put("n", name).put("p", TCP_PORT).put("g", group)
-            .put("pair", pairingNow).toString().toByteArray()
+            .put("pair", pairingNow).put("pv", PAIR_VERSION).toString().toByteArray()
         try {
             DatagramSocket().use { s ->
                 s.broadcast = true
@@ -372,7 +507,7 @@ class Sync(
                 val a = try {
                     val o = JSONObject(String(p.data, 0, p.length))
                     if (o.optString("a") != APP || o.optInt("v") < 1) continue
-                    Announce(o.getString("id"), o.optString("n"), o.optInt("p", TCP_PORT), o.optString("g"), o.optBoolean("pair"))
+                    Announce(o.getString("id"), o.optString("n"), o.optInt("p", TCP_PORT), o.optString("g"), o.optBoolean("pair"), o.optInt("pv", 1))
                 } catch (e: Exception) {
                     continue
                 }
@@ -389,6 +524,7 @@ class Sync(
                     upsert(Peer(a.id, a.name, host, a.port))
                     endPairing("Уже связано с «${a.name}»")
                 }
+                a.pairVersion < PAIR_VERSION -> endPairing(UPDATE_OTHER)
                 !leads(a.group, a.id) -> pairWith(a, host)
             }
             return
@@ -425,20 +561,28 @@ class Sync(
         emptyList()
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "homescreen"
         const val APP = "showylauncher"
         const val UDP_PORT = 47123
         const val TCP_PORT = 47124
         const val PAIR_MS = 120_000L
+        /** 2: linking asks for the same code on both screens. */
+        const val PAIR_VERSION = 2
+        const val UPDATE_OTHER = "Обновите лаунчер на другом ТВ"
+        val OK = "ok".toByteArray()
         /** A request is a few hundred kilobytes at most; anything longer is not ours. */
         const val MAX_LINE = 8 * 1024 * 1024
+        const val SERVER_THREADS = 2
+        const val SERVER_QUEUE = 4
+        /** The whole request must arrive within this, however slowly its bytes trickle in. */
+        const val REQUEST_MS = 30_000L
 
         val rnd = SecureRandom()
 
         fun error(e: String): JSONObject = JSONObject().put("e", e)
 
-        fun readLine(input: InputStream): String? {
+        fun readLine(input: InputStream, deadline: Long = Long.MAX_VALUE): String? {
             val out = java.io.ByteArrayOutputStream()
             while (true) {
                 val b = input.read()
@@ -446,7 +590,15 @@ class Sync(
                 if (b == '\n'.code) return out.toString("UTF-8")
                 out.write(b)
                 if (out.size() > MAX_LINE) return null
+                if (System.currentTimeMillis() > deadline) return null
             }
+        }
+
+        /** Four digits from the linking secret: the same on both TVs only if nobody stood between them. */
+        fun code(secret: ByteArray): String {
+            val h = sha256(secret + "showylauncher-code".toByteArray())
+            val n = ((h[0].toInt() and 0xFF) shl 24) or ((h[1].toInt() and 0xFF) shl 16) or ((h[2].toInt() and 0xFF) shl 8) or (h[3].toInt() and 0xFF)
+            return "%04d".format((n.toLong() and 0xFFFFFFFFL) % 10_000)
         }
 
         fun random(n: Int) = ByteArray(n).also { rnd.nextBytes(it) }

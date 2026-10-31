@@ -39,6 +39,8 @@ class Nav {
     var layer by mutableStateOf(Layer.NONE)
     var inputIdx by mutableIntStateOf(0)
     var settingsIdx by mutableIntStateOf(0)
+    /** The linking code's buttons: 0 «Да, связать», 1 «Отмена». */
+    var pairIdx by mutableIntStateOf(0)
     var gridIdx by mutableIntStateOf(0)
     /** The layer the film's screen returns to on Back (the grid, search, or none). */
     var watchFrom = Layer.NONE

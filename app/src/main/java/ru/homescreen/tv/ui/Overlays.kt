@@ -338,6 +338,44 @@ fun FocusPoster(t: Title, focused: Boolean, w: Float, h: Float, accent: State<Co
     }
 }
 
+/**
+ * Linking two TVs: the same four digits on both, and the key is handed over only after «Да» on each. [focus] 0 is
+ * «Да, связать», 1 «Отмена»; once this TV said yes ([Sync.Confirm.waiting]) only «Отмена» is left.
+ */
+@Composable
+fun PairCode(c: ru.homescreen.tv.data.Sync.Confirm?, focus: Int) {
+    AnimatedVisibility(c != null, enter = fadeIn(tween(200)), exit = fadeOut(tween(150))) {
+        val shown = c ?: return@AnimatedVisibility
+        Box(Modifier.fillMaxSize().background(Colors.Shade), contentAlignment = Alignment.Center) {
+            Column(
+                Modifier.width(720.u).shadow(30.u, Shapes.menu).clip(Shapes.menu).background(Colors.Surface)
+                    .padding(start = 56.u, end = 56.u, top = 56.u, bottom = 44.u),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(28.u),
+            ) {
+                BasicText("Связать с «${shown.name}»", maxLines = 1, overflow = TextOverflow.Ellipsis, style = text(Type.LARGE, 600))
+                BasicText(shown.code, style = text(Type.CODE, 800, if (shown.waiting) Colors.Faint else Colors.Fg).merge(TextStyle(letterSpacing = 0.2.em)))
+                BasicText(if (shown.waiting) "Подтвердите на другом ТВ" else "Такой же код на другом ТВ?", style = text(Type.SMALL, 400, Colors.Muted))
+                Row(Modifier.padding(top = 8.u), horizontalArrangement = Arrangement.spacedBy(20.u)) {
+                    if (!shown.waiting) PairButton("Да, связать", focus == 0)
+                    PairButton("Отмена", shown.waiting || focus == 1)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairButton(label: String, focused: Boolean) {
+    Box(
+        Modifier.graphicsLayer { val s = if (focused) FocusSpec.CONTROL else 1f; scaleX = s; scaleY = s }
+            .clip(Shapes.pill).background(if (focused) Colors.Focus else Colors.Pale)
+            .padding(horizontal = 44.u, vertical = 18.u),
+    ) {
+        BasicText(label, style = text(Type.BODY, if (focused) 600 else 500, if (focused) Colors.FocusFg else Colors.Fg))
+    }
+}
+
 @Composable
 fun Toast(nav: Nav) {
     LaunchedEffect(nav.toast) {

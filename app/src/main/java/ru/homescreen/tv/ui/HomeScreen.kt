@@ -256,6 +256,7 @@ private fun Home(vm: HomeViewModel, homePresses: Int, inputsPresses: Int, voiceP
         GridScreen(nav.base == Layer.PERSON, person?.person?.name ?: "", person?.titles.orEmpty(), person?.idx ?: 0, person?.loading == true,
             accent, person = person?.person) { vm.newEpisode(it, short = true) }
         ContextMenu(nav.layer == Layer.MENU, nav.menu, nav.menuIdx)
+        PairCode(vm.sync.confirm, nav.pairIdx)
         Toast(nav)
     }
 }
@@ -269,6 +270,8 @@ private class Actions(
         val ok = k == Key.DirectionCenter || k == Key.Enter || k == Key.NumPadEnter
         val back = k == Key.Back || k == Key.Escape
         if (!ok && !back && k != Key.DirectionUp && k != Key.DirectionDown && k != Key.DirectionLeft && k != Key.DirectionRight) return false
+        // The linking code sits over everything, whichever layer was open when the other TV answered.
+        vm.sync.confirm?.let { return pairKey(it, k, ok, back) }
 
         // Any key ends trailer mode; arrows still move at once, only Back is spent on leaving it.
         if (nav.trailer && nav.layer == Layer.NONE) {
@@ -735,6 +738,16 @@ private class Actions(
                 })
             }
         }
+    }
+
+    private fun pairKey(c: ru.homescreen.tv.data.Sync.Confirm, k: Key, ok: Boolean, back: Boolean): Boolean {
+        when {
+            back || (ok && (c.waiting || nav.pairIdx == 1)) -> { vm.sync.decline(); nav.pairIdx = 0 }
+            ok -> vm.sync.accept()
+            k == Key.DirectionLeft -> nav.pairIdx = 0
+            k == Key.DirectionRight -> nav.pairIdx = 1
+        }
+        return true
     }
 
     private fun menuKey(k: Key, ok: Boolean, back: Boolean): Boolean {

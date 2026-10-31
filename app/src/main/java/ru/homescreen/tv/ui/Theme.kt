@@ -82,6 +82,8 @@ object Type {
     const val DISPLAY = 64
     const val CLOCK = 52
     const val NUMERAL = 72
+    /** The four digits two TVs compare when linking. */
+    const val CODE = 120
 }
 
 /** Four corner sizes: pills (half the height), cards and pictures, menus, and small chips and badges. */
