@@ -7,10 +7,12 @@ import java.net.URLEncoder
 
 /**
  * TMDB through the same mirrors the «Подборки» plugin uses: direct TMDB is blocked in Russia, so the CUB proxy goes
- * first and the host that answered is tried first next time.
+ * first and the host that answered is tried first next time. CUB sends some requests (searches, a season's episodes)
+ * on to TMDB itself, which is blocked too: those go to the TMDB proxy of Showy's Lampac server instead, and CUB stays
+ * first for the rest.
  */
 object Tmdb {
-    private val apiHosts = listOf("https://apitmdb.cub.best/3/", "https://api.themoviedb.org/3/")
+    private val apiHosts = listOf("https://apitmdb.cub.best/3/", "https://showy.pro/tmdb/api/3/", "https://api.themoviedb.org/3/")
     private val imageHosts = listOf("https://imagetmdb.com/t/p/", "https://image.tmdb.org/t/p/")
     private const val PROBE = "w92/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"
 
@@ -32,9 +34,13 @@ object Tmdb {
         val q = StringBuilder("api_key=").append(BuildConfig.TMDB_KEY).append("&language=").append(language)
         for ((k, v) in params) if (v != null) q.append('&').append(k).append('=').append(URLEncoder.encode(v.toString(), "UTF-8"))
         val order = listOf(goodApi) + apiHosts.indices.filter { it != goodApi }
+        var redirected = false
         for (i in order) {
-            val j = Net.json(apiHosts[i] + path + "?" + q)
-            if (j != null) { goodApi = i; return j }
+            val a = Net.fetchJson(apiHosts[i] + path + "?" + q)
+            // A mirror that only passed this request on still answers the others: it keeps its place.
+            a.json?.let { if (!redirected) goodApi = i; return it }
+            redirected = redirected || a.redirected
+            android.util.Log.i("homescreen", "tmdb: ${apiHosts[i].substringAfter("//").substringBefore('/')} ${if (a.redirected) "redirects" else "fails (${a.why})"} $path")
         }
         return null
     }

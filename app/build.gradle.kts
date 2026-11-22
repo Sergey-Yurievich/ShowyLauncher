@@ -24,8 +24,8 @@ android {
         minSdk = 28
         // Google TV 14 refuses sideloads with an old target; 34 also keeps Android 12 behaviour predictable.
         targetSdk = 34
-        versionCode = 16
-        versionName = "1.12"
+        versionCode = 17
+        versionName = "1.13"
         buildConfigField("String", "TMDB_KEY", "\"$tmdbKey\"")
     }
 

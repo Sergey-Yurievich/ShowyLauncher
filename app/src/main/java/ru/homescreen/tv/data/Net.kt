@@ -6,7 +6,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Cache
 import okhttp3.Call
 import okhttp3.Callback
+import okhttp3.Connection
 import okhttp3.Dns
+import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -29,6 +31,7 @@ object Net {
         if (::client.isInitialized) return
         client = OkHttpClient.Builder()
             .dns(SafeDns)
+            .eventListenerFactory { FailureLog() }
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(10, TimeUnit.SECONDS)
             .cache(Cache(File(context.cacheDir, "http"), 20L * 1024 * 1024))
@@ -46,6 +49,29 @@ object Net {
         null
     }
 
+    /**
+     * What an API mirror answered: its JSON, or that it sent the request on elsewhere ([redirected], not followed), or
+     * why there is nothing ([why]: the HTTP code or the error, for the log).
+     */
+    class Fetched(val json: JSONObject?, val redirected: Boolean, val why: String = "")
+
+    private val unredirected by lazy { client.newBuilder().followRedirects(false).followSslRedirects(false).build() }
+
+    /** [json] for an API behind mirrors: a redirect is reported instead of followed, so the next mirror can be asked. */
+    suspend fun fetchJson(url: String): Fetched = try {
+        unredirected.newCall(Request.Builder().url(url).build()).await { r ->
+            when {
+                r.isRedirect -> Fetched(null, true)
+                !r.isSuccessful -> Fetched(null, false, "HTTP ${r.code}")
+                else -> Fetched(r.body?.string()?.let { JSONObject(it) }, false)
+            }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Fetched(null, false, e.javaClass.simpleName)
+    }
+
     /** True when the URL answers 2xx within the client's timeouts. */
     suspend fun reachable(url: String): Boolean = try {
         client.newCall(Request.Builder().url(url).head().build()).await { it.isSuccessful }
@@ -53,6 +79,23 @@ object Net {
         throw e
     } catch (e: Exception) {
         false
+    }
+}
+
+/** A failed call goes to the log with the address it was connected to: which addresses stall is what goes wrong here. */
+private class FailureLog : EventListener() {
+    @Volatile private var address: InetAddress? = null
+
+    override fun connectionAcquired(call: Call, connection: Connection) {
+        address = connection.route().socketAddress.address
+    }
+
+    override fun callFailed(call: Call, ioe: IOException) {
+        if (ioe.message == "Canceled") return
+        val host = call.request().url.host
+        android.util.Log.i("homescreen", "net: $host via ${address?.hostAddress ?: "no connection"}: ${ioe.javaClass.simpleName}")
+        val ip = address
+        if (ioe is java.net.SocketTimeoutException && ip != null) SafeDns.stalled(host, ip)
     }
 }
 
@@ -81,14 +124,14 @@ suspend fun <T> Call.await(read: (Response) -> T): T = suspendCancellableCorouti
  * Addresses that answer, in two cases:
  * - The home DNS answers 127.0.0.1 for api.themoviedb.org, and the CUB mirror redirects some requests (a season's
  *   episodes) there. Hosts the system resolves to loopback are looked up over HTTPS (Cloudflare, then Google) instead.
- * - The TMDB mirrors are behind Cloudflare, and some providers stall connections to part of its addresses after the
- *   first ~16 KB: small answers pass, posters never arrive. Which addresses a TV gets depends on its DNS (one with
+ * - The TMDB mirrors (and showy.pro, with its TMDB proxy) are behind Cloudflare, and some providers stall connections
+ *   to part of its addresses after the first ~16 KB: small answers pass, posters never arrive. Which addresses a TV gets depends on its DNS (one with
  *   AdGuard as private DNS got only stalled ones), so the mirrors' addresses from the system and over HTTPS are each
  *   tried with a real download, and the ones that finish go first.
  */
 private object SafeDns : Dns {
     /** Cloudflare serves any of its sites from any of its addresses: one download tells about an address for both. */
-    private val MIRRORS = setOf("imagetmdb.com", "apitmdb.cub.best")
+    private val MIRRORS = setOf("imagetmdb.com", "apitmdb.cub.best", "showy.pro")
     private const val PROBE = "https://imagetmdb.com/t/p/w1280/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"
     /** The probe is 43 KB; a stalled connection never gets this far. */
     private const val PROBE_MIN = 24 * 1024
@@ -102,8 +145,10 @@ private object SafeDns : Dns {
     private val doh by lazy {
         OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).build()
     }
+    /** A stall is data stopping (the read timeout), not a slow download: a busy network still gets [PROBE_MIN] through. */
     private val prober by lazy {
-        OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).callTimeout(5, TimeUnit.SECONDS).build()
+        OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
+            .callTimeout(20, TimeUnit.SECONDS).build()
     }
 
     override fun lookup(hostname: String): List<InetAddress> {
@@ -132,6 +177,11 @@ private object SafeDns : Dns {
     private fun known(ip: InetAddress): Boolean? =
         verdicts[ip]?.takeIf { System.currentTimeMillis() < it.first }?.second
 
+    /** A real request to a mirror timed out on [ip]: it goes last, whatever its probe said (a busy moment can fool one). */
+    fun stalled(host: String, ip: InetAddress) {
+        if (host in MIRRORS) verdicts[ip] = System.currentTimeMillis() + 3 * 60_000L to false
+    }
+
     /**
      * Downloads [PROBE] through each address at once. Back as soon as one finishes (a stalled one only ends at the
      * timeout) or all have answered; the rest still record their verdict for the next lookup.
@@ -141,23 +191,32 @@ private object SafeDns : Dns {
         val answers = LinkedBlockingQueue<Boolean>()
         for (ip in ips) {
             probing += ip
-            fun done(ok: Boolean) {
-                verdicts[ip] = System.currentTimeMillis() + (if (ok) 30 else 10) * 60_000L to ok
+            val started = System.currentTimeMillis()
+            fun done(bytes: Long, why: String) {
+                val ok = bytes >= PROBE_MIN
+                // A stalled address is tried again soon: a busy moment must not shut a good one out for long.
+                verdicts[ip] = System.currentTimeMillis() + (if (ok) 30 else 3) * 60_000L to ok
                 probing -= ip
-                android.util.Log.i("homescreen", "dns: ${ip.hostAddress} ${if (ok) "downloads" else "stalls"}")
+                android.util.Log.i("homescreen", "dns: ${ip.hostAddress} ${if (ok) "downloads" else "stalls"} " +
+                    "($bytes B, ${System.currentTimeMillis() - started} ms$why)")
                 answers.add(ok)
             }
             val only = object : Dns { override fun lookup(hostname: String) = listOf(ip) }
             prober.newBuilder().dns(only).build().newCall(Request.Builder().url(PROBE).build())
                 .enqueue(object : Callback {
-                    override fun onFailure(call: Call, e: IOException) = done(false)
+                    override fun onFailure(call: Call, e: IOException) = done(0, ", ${e.javaClass.simpleName}")
 
-                    override fun onResponse(call: Call, response: Response) = done(
-                        try { response.use { it.isSuccessful && (it.body?.bytes()?.size ?: 0) >= PROBE_MIN } } catch (e: IOException) { false }
-                    )
+                    override fun onResponse(call: Call, response: Response) {
+                        response.use { r ->
+                            if (!r.isSuccessful) { done(0, ", HTTP ${r.code}"); return }
+                            val source = r.body!!.source()
+                            val why = try { source.request(PROBE_MIN.toLong()); "" } catch (e: IOException) { ", ${e.javaClass.simpleName}" }
+                            done(source.buffer.size, why)
+                        }
+                    }
                 })
         }
-        val until = System.currentTimeMillis() + 6000
+        val until = System.currentTimeMillis() + 10_000
         repeat(ips.size) {
             val ok = answers.poll(until - System.currentTimeMillis(), TimeUnit.MILLISECONDS) ?: return
             if (ok) return
