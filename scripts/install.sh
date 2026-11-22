@@ -43,7 +43,7 @@ out=$(sh_out pm install -r -g -i "$PKG" /data/local/tmp/showylauncher.apk 2>&1 |
 A shell rm -f /data/local/tmp/showylauncher.apk
 case "$out" in
   *Success*) echo "Установлено: $(sh_out dumpsys package $PKG | grep -m1 versionName | tr -d ' ')" ;;
-  *UPDATE_INCOMPATIBLE*) die "на ТВ стоит лаунчер с другой подписью. Удалите его (adb -s $TV uninstall $PKG) и запустите снова." ;;
+  *UPDATE_INCOMPATIBLE*) die "на ТВ стоит лаунчер с другой подписью (другая сборка или версия 1.10 и старше: с 1.11 новый ключ). Удалите его (adb -s $TV uninstall $PKG) и запустите снова; история, закладки и привязка Showy сбросятся." ;;
   *) die "установка не удалась: $out" ;;
 esac
 # The TV provider (Live TV channels); install-time on some firmware, then this grant fails harmlessly.

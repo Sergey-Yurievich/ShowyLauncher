@@ -11,6 +11,9 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 val tmdbKey: String = localProps.getProperty("tmdb.apiKey", "")
+// The maintainer's release key (since 1.11), also named in local.properties: release.storeFile, release.storePassword,
+// release.keyAlias. Updates install over an existing launcher only with that same key.
+val releaseStore: String? = localProps.getProperty("release.storeFile")
 
 android {
     namespace = "ru.homescreen.tv"
@@ -26,14 +29,23 @@ android {
         buildConfigField("String", "TMDB_KEY", "\"$tmdbKey\"")
     }
 
+    signingConfigs {
+        if (releaseStore != null) create("release") {
+            storeFile = file(releaseStore)
+            storePassword = localProps.getProperty("release.storePassword")
+            keyAlias = localProps.getProperty("release.keyAlias")
+            keyPassword = localProps.getProperty("release.storePassword")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideloaded over ADB, never through a store. Releases are signed with the maintainer's debug keystore:
-            // updates install over an existing launcher only with that same key, so it is kept backed up.
-            signingConfig = signingConfigs.getByName("debug")
+            // Sideloaded over ADB, never through a store. Without the release key a build is signed with the debug
+            // key: fine for a developer's own TV, never for a GitHub release.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -100,12 +100,17 @@ Showy кодом в @showybot, проверяет кнопки пульта. П�
     приложения прячутся под ним.
 - **Выпуск версии:**
   1. Поднять `versionCode` и `versionName` в `app/build.gradle.kts`.
-  2. `./gradlew assembleRelease`.
-  3. `cp app/build/outputs/apk/release/app-release.apk build/ShowyLauncher.apk`, потом
+  2. `./gradlew assembleRelease`. Ключ релизов задают строки `release.*` в `local.properties` (резервная копия ключа
+     и пароля у мейнтейнера). Без них сборка подписывается debug-ключом и для релиза не годится.
+  3. Проверить подпись: `apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk`. SHA-256
+     должен быть `2c895d5f2695702ea295177c9f3c3d3791a60a25768b835d4d166841b07ad7ae` (CN=ShowyLauncher, ключ с 1.11).
+     Другой отпечаток — не публиковать.
+  4. `cp app/build/outputs/apk/release/app-release.apk build/ShowyLauncher.apk`, потом
      `gh release create vX.Y build/ShowyLauncher.apk --title "ShowyLauncher X.Y" --notes-file <заметки>`. Не
      `app-release.apk#ShowyLauncher.apk`: суффикс `#` у `gh` задаёт только подпись, файл останется `app-release.apk`.
 
   Тег — `v` + `versionName` (например `v1.2`): лаунчеры сравнивают его со своей версией (`Updater`) и предлагают
   обновиться в меню шестерёнки. Файл в релизе должен называться `ShowyLauncher.apk`: его же ищет `Updater`, а `install.sh` качает
   `releases/latest/download/ShowyLauncher.apk`. Релизы подписаны ключом мейнтейнера. Сборка с другим ключом не встанет
-  поверх уже установленного лаунчера.
+  поверх уже установленного лаунчера. Версии 1.0–1.10 подписаны прежним ключом, он утерян: с них на 1.11+ не обновиться
+  через меню, только удалить и поставить заново.
