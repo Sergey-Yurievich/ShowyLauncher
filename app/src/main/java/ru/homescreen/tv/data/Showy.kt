@@ -53,24 +53,54 @@ object Showy {
         }
     val host: String get() = server.host
 
+    /**
+     * One token per server, as each binds its own. A server without one borrows another's first (the Lampa plugin
+     * keeps a single `showy_token` for all of them, and the PRO ones share theirs): only when the server refuses it is
+     * a code shown, and switching back finds the server's own token still there. An empty one stored for a server
+     * means "refused, do not borrow".
+     */
     var token: String
-        get() = prefs.getString(tokenKey, "") ?: ""
-        set(v) = prefs.edit().putString(tokenKey, v).apply()
-    private val tokenKey get() = if (server.pro) "token" else "token_free"
+        get() = own(server) ?: (if (server.pro) listOf(Server.RU, Server.WORLD, Server.FREE) else listOf(Server.FREE, Server.RU, Server.WORLD))
+            .filter { it != server }.firstNotNullOfOrNull { own(it)?.takeIf(String::isNotEmpty) } ?: ""
+        set(v) = prefs.edit().putString(tokenKey(server), v).apply()
+
+    /** Whether this server has a token of its own (not one borrowed for a try). */
+    val bound: Boolean get() = !own(server).isNullOrEmpty()
+
+    /** The PRO server to go to from the free one: the one with its own token, else «РФ и соседи». */
+    val preferredPro: Server get() = if (!own(Server.RU).isNullOrEmpty() || own(Server.WORLD).isNullOrEmpty()) Server.RU else Server.WORLD
+
+    private fun tokenKey(s: Server) = "token_" + s.name
+
+    /** The server's own token; before 1.11 the PRO servers shared "token" and the free one had "token_free". */
+    private fun own(s: Server): String? {
+        val key = tokenKey(s)
+        if (prefs.contains(key)) return prefs.getString(key, "")
+        return prefs.getString(if (s.pro) "token" else "token_free", null)?.takeIf { it.isNotEmpty() }
+    }
 
     /** The server refused: no token, inactive device or no PRO. [msg] is its own wording. */
     class Denied(val msg: String) : Exception(msg)
 
     // ---------- Device code ----------
 
-    suspend fun newCode(): Int? = post(server.codeUrl, null)?.let { runCatching { JSONObject(it).optInt("code") }.getOrNull() }
-        ?.takeIf { it > 0 }
+    /** The claim proves the polling device is the one the code was shown on: the free server hands one out (as in its
+     * online.js) and wants it back with the code. */
+    private val claims = java.util.concurrent.ConcurrentHashMap<Int, String>()
+
+    suspend fun newCode(): Int? {
+        val j = post(server.codeUrl + if (server.pro) "" else "?claim=1", null)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+        val code = j.optInt("code").takeIf { it > 0 } ?: return null
+        j.optString("claim").takeIf { it.isNotEmpty() && it != "null" }?.let { claims[code] = it }
+        return code
+    }
 
     enum class CodeState { PENDING, OK, EXPIRED }
 
     /** Polled while the code is on screen; stores the token once the bot has bound it. */
     suspend fun checkCode(code: Int): CodeState {
-        val r = post(server.checkUrl, JSONObject().put("code", code).toString()) ?: return CodeState.PENDING
+        val body = JSONObject().put("code", code).apply { claims[code]?.let { put("claim", it) } }
+        val r = post(server.checkUrl, body.toString()) ?: return CodeState.PENDING
         val j = runCatching { JSONObject(r) }.getOrNull() ?: return CodeState.PENDING
         val t = j.optString("token").takeIf { it.isNotEmpty() && it != "null" }
         return when (j.optString("status")) {

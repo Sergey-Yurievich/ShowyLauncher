@@ -32,6 +32,8 @@ class WatchSession(
     private val detailsOf: suspend (Title) -> Details?,
     /** The details as loaded so far (for the trailer pill); reading it follows them as they arrive. */
     private val details: () -> Details?,
+    /** Moves the launcher to another Showy server (the free one sends a PRO device to its PRO server). */
+    private val onServer: (Showy.Server) -> Unit = { Showy.server = it },
     private val onPlayed: () -> Unit,
 ) {
     enum class Phase { LOADING, AUTH, DENIED, READY, ERROR }
@@ -185,7 +187,11 @@ class WatchSession(
             Showy.sources(q) { list, done ->
                 sources = list
                 sourcesDone = done
-                if (list.isNotEmpty()) phase = Phase.READY
+                if (list.isNotEmpty()) {
+                    phase = Phase.READY
+                    // A token borrowed from another server worked: it is this server's own from now on.
+                    if (!Showy.bound) Showy.token = Showy.token
+                }
                 // Filmix first, always; an empty one gives way to the next source (see [auto]).
                 if (source == null) {
                     val pick = list.firstOrNull { it.key == DEFAULT_SOURCE && it.show }
@@ -203,6 +209,14 @@ class WatchSession(
     }
 
     private suspend fun denied(msg: String) {
+        // The free server, given a PRO token, answers "У вас есть PRO": the PRO server is the right one, so it is picked.
+        if (!Showy.server.pro && msg.contains("PRO", ignoreCase = true) && msg.contains("есть", ignoreCase = true)) {
+            android.util.Log.i("homescreen", "showy: free server says PRO, switching to ${Showy.preferredPro}")
+            onServer(Showy.preferredPro)
+            sources = emptyList(); source = null; sourcesDone = false
+            load()
+            return
+        }
         if (msg.contains("авториз", ignoreCase = true)) {
             Showy.token = ""
             auth()

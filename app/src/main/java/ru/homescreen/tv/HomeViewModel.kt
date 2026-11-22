@@ -364,7 +364,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
     fun openWatch(t: Title, resume: Pair<WatchSession.Zone, Int>? = null) {
         watch?.close()
         requestDetails(t)
-        watch = WatchSession(t, viewModelScope, history, ::freshDetails, { details[t.key] }) { refreshContinue() }
+        watch = WatchSession(t, viewModelScope, history, ::freshDetails, { details[t.key] }, onServer = ::selectServer) { refreshContinue() }
             .also { it.resume = resume; it.start() }
     }
 
